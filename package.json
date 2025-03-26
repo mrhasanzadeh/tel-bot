@@ -1,11 +1,11 @@
 {
   "name": "tel-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for file sharing with Cloudflare Workers",
-  "main": "src/index.js",
+  "description": "A Telegram bot for file sharing with channel membership verification",
+  "main": "index.js",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "start": "node index.js --watch",
+    "dev": "nodemon index.js"
   },
   "keywords": [
     "telegram",
@@ -16,9 +16,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "telegraf": "^4.15.3"
+    "dotenv": "^16.0.3",
+    "telegraf": "^4.12.2"
   },
   "devDependencies": {
-    "wrangler": "^4.4.0"
+    "nodemon": "^2.0.22"
   }
 }
