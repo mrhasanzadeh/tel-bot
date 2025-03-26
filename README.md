@@ -1,54 +1,71 @@
-# Telegram File Sharing Bot
+# ربات تلگرام شیوری
 
-A Telegram bot that allows users to share files through a private channel and retrieve them using unique keys.
+این ربات تلگرام برای اشتراک‌گذاری فایل‌ها با تأیید عضویت در کانال طراحی شده است.
 
-## Features
+## ویژگی‌ها
 
-- File sharing through private channel
-- File retrieval using unique 6-digit keys
-- Channel membership verification
-- File size formatting
-- Comprehensive logging
-- Error handling
+- اشتراک‌گذاری فایل‌ها در کانال خصوصی
+- تأیید عضویت کاربران در کانال عمومی
+- ایجاد کلید و لینک مستقیم برای هر فایل
+- حذف خودکار فایل‌ها پس از یک دقیقه
+- پشتیبانی از انواع مختلف فایل (مستندات، عکس، ویدیو، صدا)
 
-## Installation
+## نصب و راه‌اندازی
 
-1. Clone the repository:
-
-```bash
-git clone <repository-url>
-cd tel-bot
-```
-
-2. Install dependencies:
+1. نصب وابستگی‌ها:
 
 ```bash
 npm install
 ```
 
-3. Create a `.env` file with the following variables:
+2. تنظیم متغیرهای محیطی در فایل `wrangler.toml`:
 
+```toml
+[vars]
+BOT_TOKEN = "توکن بات تلگرام"
+PRIVATE_CHANNEL_ID = "شناسه کانال خصوصی"
+PUBLIC_CHANNEL_ID = "شناسه کانال عمومی"
+PUBLIC_CHANNEL_USERNAME = "نام کاربری کانال عمومی"
 ```
-BOT_TOKEN=your_bot_token
-PRIVATE_CHANNEL_ID=your_private_channel_id
-PUBLIC_CHANNEL_ID=your_public_channel_id
-PUBLIC_CHANNEL_USERNAME=your_public_channel_username
-```
 
-## Usage
-
-1. Start the bot:
+3. ورود به حساب Cloudflare:
 
 ```bash
-node index.js
+npx wrangler login
 ```
 
-2. Add the bot to your private channel as an administrator
-3. Send files to the private channel
-4. The bot will generate a unique 6-digit key for each file
-5. Users can retrieve files by:
-   - Using the /start command with the file key
-   - Sending the file key directly to the bot
+4. استقرار روی Cloudflare Workers:
+
+```bash
+npm run deploy
+```
+
+5. تنظیم وب‌هوک تلگرام:
+
+```
+https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<YOUR-WORKER-URL>/webhook
+```
+
+## توسعه محلی
+
+برای اجرای ربات در محیط محلی:
+
+```bash
+npm run dev
+```
+
+## نحوه استفاده
+
+1. ارسال فایل به کانال خصوصی
+2. ربات به صورت خودکار یک کلید و لینک مستقیم به کپشن فایل اضافه می‌کند
+3. کاربران با کلیک روی لینک مستقیم و عضویت در کانال می‌توانند فایل را دریافت کنند
+4. فایل‌های ارسال شده پس از یک دقیقه به صورت خودکار حذف می‌شوند
+
+## نکات مهم
+
+- اطمینان حاصل کنید که بات ادمین کانال خصوصی است
+- اطمینان حاصل کنید که بات دسترسی لازم برای ویرایش پیام‌ها را دارد
+- در صورت خطا در ویرایش کپشن، ربات یک پیام جدید با لینک ارسال می‌کند
 
 ## Requirements
 
