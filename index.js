@@ -249,24 +249,52 @@ bot.command('start', async (ctx) => {
                 
                 // به‌روزرسانی آمار دانلود
                 await databaseService.incrementFileDownloads(fileKey);
-                console.log(`✅ File sent to user: ${ctx.from.id}`);
                 
+                // ارسال پیام هشدار پس از ارسال فایل
+                const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
+                
+                // حذف فایل از چت پس از ۳۰ ثانیه
+                setTimeout(async () => {
+                    try {
+                        // حذف پیام فایل
+                        try {
+                            await ctx.deleteMessage(sentMessage.message_id);
+                            console.log(`Deleted file message ${sentMessage.message_id} after 30 seconds`);
+                        } catch (fileError) {
+                            if (fileError.description && fileError.description.includes('message to delete not found')) {
+                                console.log(`File message ${sentMessage.message_id} already deleted`);
+                            } else {
+                                console.error(`Error deleting file message ${sentMessage.message_id}:`, fileError);
+                            }
+                        }
+                        
+                        // حذف پیام هشدار
+                        try {
+                            await ctx.deleteMessage(warningMessage.message_id);
+                            console.log(`Deleted warning message ${warningMessage.message_id} after 30 seconds`);
+                        } catch (warnError) {
+                            if (warnError.description && warnError.description.includes('message to delete not found')) {
+                                console.log(`Warning message ${warningMessage.message_id} already deleted`);
+                            } else {
+                                console.error(`Error deleting warning message ${warningMessage.message_id}:`, warnError);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('General error in message deletion timeout:', error);
+                    }
+                }, 30000); // 30000 میلی‌ثانیه = 30 ثانیه
+                
+                console.log(`File sent to user ${ctx.from.id}`);
             } else {
-                await ctx.reply('⚠️ فایل پیدا نشد! لطفاً کد را بررسی کنید.');
+                await ctx.reply('⚠️ فایل پیدا نشد یا منقضی شده است!');
             }
         } else {
-            // اگر لینک دریافت فایل نبود، پیام خوش‌آمدگویی نمایش داده شود
-            const isMember = await checkUserMembership(ctx);
-            if (isMember) {
-                await ctx.reply('👋 به ربات شیوری خوش آمدید\n\nآدرس کانال: https://t.me/+x5guW0j8thxlMTQ0', { disable_web_page_preview: true });
-            } else {
-                const welcomeMessage = '👋 به ربات ما خوش آمدید!\n📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:';
-                await ctx.reply(welcomeMessage, getSubscriptionKeyboard());
-            }
+            // پیام خوش‌آمدگویی به کاربر جدید
+            await ctx.reply(`🌹 سلام ${ctx.from.first_name}!\n\n🤖 به ربات آپلودر خوش آمدید.\n\n🔍 فایل‌های مورد نظر خود را می‌توانید از طریق لینک‌های مستقیم دریافت کنید.`);
         }
     } catch (error) {
-        console.error('Error processing start command:', error.message);
-        await ctx.reply('⚠️ خطا در پردازش درخواست. لطفاً بعداً دوباره تلاش کنید.');
+        console.error('Error in start command handler:', error);
+        await ctx.reply('⚠️ خطایی در پردازش درخواست شما رخ داد. لطفاً بعداً تلاش کنید.');
     }
 });
 
@@ -309,16 +337,16 @@ bot.action('check_membership', async (ctx) => {
                     }
 
                     // ارسال پیام هشدار
-                    await ctx.reply('⚠️ فایل ارسال‌شده به دلایل مشخص پس از یک دقیقه حذف می‌شود. لطفاً جهت دریافت فایل آن را به پیام‌های ذخیره‌شده یا پیام خصوصی دوستان خود فوروارد کنید.');
+                    await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n✅ جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.');
 
-                    // حذف فایل بعد از 1 دقیقه
+                    // حذف فایل بعد از ۳۰ ثانیه
                     setTimeout(async () => {
                         try {
                             await ctx.telegram.deleteMessage(ctx.chat.id, sentMessage.message_id);
                         } catch (error) {
                             console.error('Error deleting message:', error);
                         }
-                    }, 60000); // 1 minute
+                    }, 30000); // 30000 میلی‌ثانیه = 30 ثانیه
                     
                     // به‌روزرسانی آمار دانلود
                     await databaseService.incrementFileDownloads(pendingLink);

@@ -13,13 +13,32 @@ const pendingLinks = new Map();
 function setupHandlers(bot) {
     // Handle channel posts
     bot.on('channel_post', async (ctx) => {
-        await fileHandlerService.processChannelPost(ctx);
+        try {
+            const chatId = ctx.chat.id;
+            const messageId = ctx.channelPost.message_id;
+            
+            if (chatId && messageId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+                await fileHandlerService.handleNewFile(ctx);
+            }
+        } catch (error) {
+            console.error('Error handling channel post:', error);
+        }
     });
 
-    // Handle deleted channel messages
-    bot.on('channel_post_deleted', async (ctx) => {
-        if (ctx.update?.channel_post_deleted?.message_ids) {
-            await fileHandlerService.handleDeletedMessages(ctx, ctx.update.channel_post_deleted.message_ids);
+    // Handle deleted messages
+    bot.on('message_delete', async (ctx) => {
+        try {
+            const chatId = ctx.chat.id;
+            
+            if (chatId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+                const messageIds = ctx.update?.message_delete?.message_ids || [];
+                
+                if (messageIds.length > 0) {
+                    await fileHandlerService.handleDeletedMessages(ctx, messageIds);
+                }
+            }
+        } catch (error) {
+            console.error('Error handling message deletion:', error);
         }
     });
 
@@ -27,7 +46,7 @@ function setupHandlers(bot) {
     bot.command('start', handleStartCommand);
 
     // Handle membership check callback
-    bot.action('check_membership', handleMembershipCheck);
+    bot.action(/check_membership_(.+)/, handleMembershipCheck);
 }
 
 /**
@@ -37,37 +56,40 @@ function setupHandlers(bot) {
  */
 async function handleStartCommand(ctx) {
     try {
-        const args = ctx.message.text.split(' ');
-        // Check if it's a file request link
-        if (args.length > 1 && args[1].startsWith('get_')) {
-            const fileKey = args[1].replace('get_', '').toLowerCase();
-            console.log('\n🔍 File Key Request:');
-            console.log(`Key: ${fileKey}`);
-            console.log(`User ID: ${ctx.from.id}`);
-            
-            const isMember = await membershipService.checkUserMembership(ctx);
-            
-            if (!isMember) {
-                // Save link for user
-                pendingLinks.set(ctx.from.id, fileKey);
-                console.log(`User is not a member. Link saved for user ${ctx.from.id}`);
-                await sendNotMemberMessage(ctx);
-                return;
-            }
-            
-            await fileHandlerService.sendFileToUser(ctx, fileKey);
+        const userId = ctx.from.id;
+        const username = ctx.from.username;
+        const isMember = await membershipService.isMember(userId);
+
+        if (isMember) {
+            // If user is a member, send welcome message
+            await ctx.reply(
+                `سلام ${username || 'کاربر'} عزیز! 👋\n\n` +
+                'به ربات دانلود فایل خوش آمدید. برای دریافت فایل مورد نظر، لطفاً لینک آن را ارسال کنید.'
+            );
         } else {
-            // Show welcome message if not a file request
-            const isMember = await membershipService.checkUserMembership(ctx);
-            if (isMember) {
-                await ctx.reply('👋 Welcome to Shiori Bot\n\nChannel address: https://t.me/+x5guW0j8thxlMTQ0', { disable_web_page_preview: true });
-            } else {
-                await sendNotMemberMessage(ctx);
-            }
+            // If user is not a member, show join button
+            const joinButton = {
+                inline_keyboard: [[
+                    { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
+                    { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
+                ]]
+            };
+
+            await ctx.reply(
+                'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
+                { reply_markup: joinButton }
+            );
+        }
+
+        // If there's a pending file request, process it
+        const pendingLink = pendingLinks.get(userId);
+        if (pendingLink) {
+            pendingLinks.delete(userId);
+            await fileHandlerService.handleFileRequest(ctx, pendingLink);
         }
     } catch (error) {
         console.error('Error handling start command:', error);
-        await ctx.reply('⚠️ An error occurred. Please try again later.');
+        await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
     }
 }
 
@@ -78,33 +100,44 @@ async function handleStartCommand(ctx) {
  */
 async function handleMembershipCheck(ctx) {
     try {
-        const isMember = await membershipService.checkUserMembership(ctx);
-        
+        const userId = ctx.from.id;
+        const username = ctx.from.username;
+        const isMember = await membershipService.isMember(userId);
+
         if (isMember) {
-            await ctx.answerCbQuery('✅ Membership verified! You can now access files.', { show_alert: true });
-            await ctx.editMessageText('✅ Membership verified! You can now access files.');
-            
-            // Check if user has a pending link
-            const fileKey = pendingLinks.get(ctx.from.id);
-            if (fileKey) {
-                pendingLinks.delete(ctx.from.id);
-                console.log(`Processing pending link for user ${ctx.from.id}: ${fileKey}`);
-                
-                // Delay sending file to avoid rate limits
-                setTimeout(async () => {
-                    await ctx.reply('📤 Sending your requested file...');
-                    await fileHandlerService.sendFileToUser(ctx, fileKey);
-                }, 1000);
-            }
+            // If user is now a member, send welcome message
+            await ctx.editMessageText(
+                `سلام ${username || 'کاربر'} عزیز! 👋\n\n` +
+                'به ربات دانلود فایل خوش آمدید. برای دریافت فایل مورد نظر، لطفاً لینک آن را ارسال کنید.'
+            );
         } else {
-            await sendNotMemberMessage(ctx);
+            // If user is still not a member, show join button again
+            const joinButton = {
+                inline_keyboard: [[
+                    { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
+                    { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
+                ]]
+            };
+
+            await ctx.editMessageText(
+                'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
+                { reply_markup: joinButton }
+            );
+        }
+
+        // If there's a pending file request, process it
+        const pendingLink = pendingLinks.get(userId);
+        if (pendingLink) {
+            pendingLinks.delete(userId);
+            await fileHandlerService.handleFileRequest(ctx, pendingLink);
         }
     } catch (error) {
-        console.error('Error checking membership:', error);
-        await ctx.answerCbQuery('⚠️ An error occurred. Please try again.', { show_alert: true });
+        console.error('Error handling membership check:', error);
+        await ctx.editMessageText('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
     }
 }
 
 module.exports = {
-    setupHandlers
+    setupHandlers,
+    pendingLinks
 }; 

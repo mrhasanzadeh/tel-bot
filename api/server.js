@@ -1,7 +1,6 @@
 const { Telegraf } = require('telegraf');
 const https = require('https');
 const config = require('../config');
-const databaseService = require('../src/services/databaseService');
 const fileHandlerService = require('../src/services/fileHandlerService');
 const { setupHandlers } = require('../src/handlers/botHandlers');
 const { markMessageDeleted } = require('../src/utils/fileUtils');
@@ -11,6 +10,7 @@ const requiredEnvVars = ['BOT_TOKEN', 'MONGODB_URI', 'PRIVATE_CHANNEL_ID', 'PUBL
 const missingEnvVars = requiredEnvVars.filter(varName => !config[varName]);
 
 if (missingEnvVars.length > 0) {
+    console.error('❌ Missing required environment variables:', missingEnvVars);
     throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
 }
 
@@ -24,25 +24,15 @@ const bot = new Telegraf(config.BOT_TOKEN, {
     }
 });
 
-// Connect to database with retry logic
-const connectToDatabase = async (retries = 3) => {
-    for (let i = 0; i < retries; i++) {
-        try {
-            await databaseService.connect();
-            console.log('✅ Successfully connected to database');
-            return;
-        } catch (error) {
-            console.error(`❌ Database connection attempt ${i + 1} failed:`, error);
-            if (i === retries - 1) throw error;
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-    }
-};
-
 // Initialize bot
 const initializeBot = async () => {
     try {
-        await connectToDatabase();
+        console.log('🚀 Initializing bot...');
+        console.log('📝 Bot configuration:', {
+            privateChannelId: config.PRIVATE_CHANNEL_ID,
+            publicChannelId: config.PUBLIC_CHANNEL_ID,
+            publicChannelUsername: config.PUBLIC_CHANNEL_USERNAME
+        });
         
         // Store previously seen message IDs
         const channelMessages = new Map();
@@ -57,6 +47,7 @@ const initializeBot = async () => {
                     channelMessages.set(chatId, new Set());
                 }
                 channelMessages.get(chatId).add(messageId);
+                console.log(`📝 Tracking new channel message: ${messageId}`);
             }
             
             return next();
@@ -92,7 +83,12 @@ const initializeBot = async () => {
 
         // Handle errors
         bot.catch((err, ctx) => {
-            console.error(`Error handling update ${ctx.update.update_id}:`, err);
+            console.error(`❌ Error handling update ${ctx.update.update_id}:`, {
+                error: err,
+                update: ctx.update,
+                type: err.name,
+                code: err.code
+            });
         });
 
         console.log('✅ Bot initialized successfully');

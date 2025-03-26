@@ -1,6 +1,7 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
 const { generateFileKey, delay, formatFileSize } = require('../utils/fileUtils');
+const { pendingLinks } = require('../handlers/botHandlers');
 
 /**
  * Service for handling file operations
@@ -22,6 +23,13 @@ class FileHandlerService {
             }
             
             const message = ctx.channelPost;
+            const file = message.document || message.video || message.audio;
+            
+            if (!file) {
+                console.log('No file found in message');
+                return;
+            }
+            
             const fileKey = generateFileKey();
             
             console.log('\n📨 Processing New Channel Post:');
@@ -63,28 +71,13 @@ class FileHandlerService {
                 return false;
             }
             
-            let sentMessage;
-            // Send message based on type
-            switch (fileData.type) {
-                case 'document':
-                    sentMessage = await ctx.replyWithDocument(fileData.fileId);
-                    break;
-                case 'photo':
-                    sentMessage = await ctx.replyWithPhoto(fileData.fileId);
-                    break;
-                case 'video':
-                    sentMessage = await ctx.replyWithVideo(fileData.fileId);
-                    break;
-                case 'audio':
-                    sentMessage = await ctx.replyWithAudio(fileData.fileId);
-                    break;
-                case 'text':
-                    sentMessage = await ctx.reply(fileData.text);
-                    break;
-                default:
-                    await ctx.reply('⚠️ File not found!');
-                    return false;
+            if (!fileData.isActive) {
+                await ctx.reply('❌ این فایل دیگر در دسترس نیست.');
+                return false;
             }
+            
+            await ctx.reply('📤 در حال ارسال فایل...');
+            await ctx.telegram.copyMessage(ctx.chat.id, config.PRIVATE_CHANNEL_ID, fileData.messageId);
             
             // Update download statistics
             await databaseService.incrementFileDownloads(fileKey);
@@ -92,7 +85,7 @@ class FileHandlerService {
             return true;
         } catch (error) {
             console.error('Error sending file to user:', error);
-            await ctx.reply('⚠️ An error occurred while sending the file.');
+            await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
             return false;
         }
     }
