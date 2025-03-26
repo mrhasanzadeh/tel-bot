@@ -1,84 +1,70 @@
 # Telegram File Sharing Bot
 
-A Telegram bot that allows users to share files through a private channel and retrieve them using unique keys.
+A modular and robust Telegram bot for sharing files with access control through channel membership verification.
 
 ## Features
 
-- File sharing through private channel
-- File retrieval using unique 6-digit keys
-- Channel membership verification
-- File size formatting
-- Comprehensive logging
-- Error handling
+- **Access Control**: Files are only accessible to users who have joined a specified channel
+- **File Tracking**: Each file gets a unique key and direct link for tracking
+- **Statistics**: Track download counts and usage patterns
+- **Support for Various Media**: Handles documents, photos, videos, audio files
+- **Error Handling**: Robust error handling and rate limiting management
 
-## Installation
+## Project Structure
 
-1. Clone the repository:
-
-```bash
-git clone <repository-url>
-cd tel-bot
+```
+├── config.js                 # Configuration variables
+├── index.js                  # Main entry point
+├── .env                      # Environment variables (private)
+└── src
+    ├── exports.js            # Module exports
+    ├── handlers
+    │   └── botHandlers.js    # Bot command and event handlers
+    ├── models
+    │   └── File.js           # Mongoose model for files
+    ├── services
+    │   ├── databaseService.js    # Database operations
+    │   ├── fileHandlerService.js # File processing operations
+    │   └── membershipService.js  # User membership verification
+    └── utils
+        ├── fileUtils.js      # File-related utility functions
+        └── uiUtils.js        # UI-related utility functions
 ```
 
+## Setup
+
+1. Clone the repository
 2. Install dependencies:
+   ```
+   npm install
+   ```
+3. Create a `.env` file based on the example below:
+   ```
+   BOT_TOKEN=your_bot_token
+   PRIVATE_CHANNEL_ID=your_private_channel_id
+   PUBLIC_CHANNEL_ID=your_public_channel_id
+   PUBLIC_CHANNEL_USERNAME=your_public_channel_username
+   MONGODB_URI=your_mongodb_connection_string
+   ```
+4. Start the bot:
+   ```
+   npm start
+   ```
 
-```bash
-npm install
-```
+## How It Works
 
-3. Create a `.env` file with the following variables:
+1. Files are posted in a private channel
+2. The bot generates a unique key for each file
+3. Users must join the public channel to access files
+4. File access is tracked for statistics
 
-```
-BOT_TOKEN=your_bot_token
-PRIVATE_CHANNEL_ID=your_private_channel_id
-PUBLIC_CHANNEL_ID=your_public_channel_id
-PUBLIC_CHANNEL_USERNAME=your_public_channel_username
-```
+## Technologies Used
 
-## Usage
+- Node.js
+- Telegraf (Telegram Bot Framework)
+- MongoDB with Mongoose
+- ES6+ JavaScript features
 
-1. Start the bot:
+## License
 
-```bash
-node index.js
-```
-
-2. Add the bot to your private channel as an administrator
-3. Send files to the private channel
-4. The bot will generate a unique 6-digit key for each file
-5. Users can retrieve files by:
-   - Using the /start command with the file key
-   - Sending the file key directly to the bot
-
-## Requirements
-
-- Node.js v12 or higher
-- npm
-- Telegram Bot Token
-- Private and Public Telegram channels
-
-## Security
-
-- The bot verifies channel membership before allowing file downloads
-- File keys are randomly generated and case-insensitive
-- HTTPS is enforced for API communication
-
-## Error Handling
-
-The bot includes comprehensive error handling for:
-
-- Network issues
-- Invalid file keys
-- Channel membership verification
-- File sending/receiving
-- Bot startup/shutdown
-
-## Logging
-
-The bot logs:
-
-- New messages received
-- Channel posts
-- File information
-- Error messages
-- Bot startup status
+MIT

@@ -1,11 +1,12 @@
 {
   "name": "tel-bot",
   "version": "1.0.0",
-  "description": "A Telegram bot for file sharing with channel membership verification",
-  "main": "index.js",
+  "description": "Telegram bot for file sharing with membership verification",
+  "main": "api/index.js",
   "scripts": {
-    "start": "node index.js --watch",
-    "dev": "nodemon index.js"
+    "start": "node api/index.js",
+    "dev": "nodemon api/index.js",
+    "deploy": "vercel deploy --prod"
   },
   "keywords": [
     "telegram",
@@ -16,10 +17,12 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "dotenv": "^16.0.3",
-    "telegraf": "^4.12.2"
+    "telegraf": "^4.15.3",
+    "mongoose": "^8.1.1",
+    "dotenv": "^16.4.1"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "nodemon": "^3.0.3",
+    "vercel": "^33.5.1"
   }
 }

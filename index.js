@@ -1,44 +1,24 @@
-const { Telegraf, Markup } = require('telegraf');
-const config = require('./config');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
+/**
+ * Telegram Bot for file sharing
+ * 
+ * This bot allows files to be shared through a restricted system where:
+ * 1. Files are posted in a private channel
+ * 2. Bot generates unique access keys for each file
+ * 3. Users must join a public channel to access files
+ * 4. Each file can be tracked for download statistics
+ * 5. Files are automatically deactivated when posts are deleted
+ */
 
-// ذخیره‌سازی فایل‌ها و کلیدهای آنها
-const fileKeys = new Map();
+const { Telegraf } = require('telegraf');
+const https = require('https');
+const config = require('./config');
+const databaseService = require('./src/services/databaseService');
+const fileHandlerService = require('./src/services/fileHandlerService');
+const { setupHandlers } = require('./src/handlers/botHandlers');
+const { markMessageDeleted } = require('./src/utils/fileUtils');
+
 // ذخیره‌سازی لینک‌های ارسال شده توسط کاربران غیرعضو
 const pendingLinks = new Map();
-
-// مسیر فایل ذخیره‌سازی کلیدها
-const STORAGE_FILE = path.join(__dirname, 'file_keys.json');
-
-// بارگذاری کلیدها از فایل
-function loadFileKeys() {
-    try {
-        if (fs.existsSync(STORAGE_FILE)) {
-            const data = JSON.parse(fs.readFileSync(STORAGE_FILE, 'utf8'));
-            Object.entries(data).forEach(([key, value]) => {
-                fileKeys.set(key, value);
-            });
-            console.log(`📥 Loaded ${fileKeys.size} file keys from storage`);
-            console.log(`Available Keys: ${Array.from(fileKeys.keys()).join(', ')}`);
-        }
-    } catch (error) {
-        console.error('Error loading file keys:', error);
-    }
-}
-
-// ذخیره کلیدها در فایل
-function saveFileKeys() {
-    try {
-        const data = Object.fromEntries(fileKeys);
-        fs.writeFileSync(STORAGE_FILE, JSON.stringify(data, null, 2));
-        console.log(`💾 Saved ${fileKeys.size} file keys to storage`);
-        console.log(`Saved Keys: ${Array.from(fileKeys.keys()).join(', ')}`);
-    } catch (error) {
-        console.error('Error saving file keys:', error);
-    }
-}
 
 // Helper function to format file size
 function formatFileSize(bytes) {
@@ -49,6 +29,7 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Initialize the bot with the token from config
 const bot = new Telegraf(config.BOT_TOKEN, {
     telegram: {
         apiRoot: 'https://api.telegram.org',
@@ -56,6 +37,12 @@ const bot = new Telegraf(config.BOT_TOKEN, {
             rejectUnauthorized: false
         })
     }
+});
+
+// Connect to database
+databaseService.connect().catch(error => {
+    console.error('❌ Failed to connect to database:', error);
+    process.exit(1);
 });
 
 // تولید کلید تصادفی
@@ -126,38 +113,44 @@ bot.on('channel_post', async (ctx) => {
             const directLink = `https://t.me/${botUsername}?start=get_${fileKey}`;
             
             // Store message information
-            let messageInfo = {
+            let fileData = {
+                key: fileKey,
                 messageId: message.message_id,
                 type: 'text',
-                date: Date.now()
+                date: Date.now(),
+                isActive: true,
+                downloads: 0
             };
 
             // Handle different message types
             if (message.document) {
-                messageInfo.type = 'document';
-                messageInfo.fileId = message.document.file_id;
-                messageInfo.fileName = message.document.file_name;
-                messageInfo.fileSize = message.document.file_size;
-                console.log(`Document Info: ${messageInfo.fileName} (${formatFileSize(messageInfo.fileSize)})`);
+                fileData.type = 'document';
+                fileData.fileId = message.document.file_id;
+                fileData.fileName = message.document.file_name;
+                fileData.fileSize = message.document.file_size;
+                console.log(`Document Info: ${fileData.fileName} (${formatFileSize(fileData.fileSize)})`);
             } else if (message.photo) {
-                messageInfo.type = 'photo';
-                messageInfo.fileId = message.photo[message.photo.length - 1].file_id;
+                fileData.type = 'photo';
+                fileData.fileId = message.photo[message.photo.length - 1].file_id;
+                fileData.fileName = 'photo.jpg';
+                fileData.fileSize = 0;
                 console.log('Photo Message');
             } else if (message.video) {
-                messageInfo.type = 'video';
-                messageInfo.fileId = message.video.file_id;
+                fileData.type = 'video';
+                fileData.fileId = message.video.file_id;
+                fileData.fileName = 'video.mp4';
+                fileData.fileSize = message.video.file_size || 0;
                 console.log('Video Message');
             } else if (message.audio) {
-                messageInfo.type = 'audio';
-                messageInfo.fileId = message.audio.file_id;
+                fileData.type = 'audio';
+                fileData.fileId = message.audio.file_id;
+                fileData.fileName = message.audio.file_name || 'audio.mp3';
+                fileData.fileSize = message.audio.file_size || 0;
                 console.log('Audio Message');
             }
 
-            // Store the message info
-            fileKeys.set(fileKey, messageInfo);
-            // ذخیره کلیدها در فایل
-            saveFileKeys();
-            
+            // ذخیره اطلاعات فایل در دیتابیس
+            await databaseService.createFile(fileData);
             console.log(`Stored Message Info for Key: ${fileKey}`);
 
             // ویرایش کپشن پیام با تأخیر و تلاش مجدد
@@ -215,7 +208,6 @@ bot.command('start', async (ctx) => {
             console.log('\n🔍 File Key Request:');
             console.log(`Key: ${fileKey}`);
             console.log(`User ID: ${ctx.from.id}`);
-            console.log(`Available Keys: ${Array.from(fileKeys.keys()).join(', ')}`);
             
             const isMember = await checkUserMembership(ctx);
             
@@ -227,61 +219,54 @@ bot.command('start', async (ctx) => {
                 return;
             }
             
-            const messageInfo = fileKeys.get(fileKey);
-            console.log(`Message Info: ${messageInfo ? JSON.stringify(messageInfo) : 'Not Found'}`);
+            // دریافت اطلاعات فایل از دیتابیس
+            const fileData = await databaseService.getFileByKey(fileKey);
+            console.log(`File Info: ${fileData ? JSON.stringify(fileData) : 'Not Found'}`);
             
-            if (messageInfo) {
+            if (fileData) {
                 let sentMessage;
                 // ارسال پیام بر اساس نوع آن
-                switch (messageInfo.type) {
+                switch (fileData.type) {
                     case 'document':
-                        sentMessage = await ctx.replyWithDocument(messageInfo.fileId);
+                        sentMessage = await ctx.replyWithDocument(fileData.fileId);
                         break;
                     case 'photo':
-                        sentMessage = await ctx.replyWithPhoto(messageInfo.fileId);
+                        sentMessage = await ctx.replyWithPhoto(fileData.fileId);
                         break;
                     case 'video':
-                        sentMessage = await ctx.replyWithVideo(messageInfo.fileId);
+                        sentMessage = await ctx.replyWithVideo(fileData.fileId);
                         break;
                     case 'audio':
-                        sentMessage = await ctx.replyWithAudio(messageInfo.fileId);
+                        sentMessage = await ctx.replyWithAudio(fileData.fileId);
                         break;
                     case 'text':
-                        sentMessage = await ctx.reply(messageInfo.text);
+                        sentMessage = await ctx.reply(fileData.text);
                         break;
+                    default:
+                        await ctx.reply('⚠️ فایل پیدا نشد!');
+                        return;
                 }
-
-                // ارسال پیام هشدار
-                await ctx.reply('⚠️ فایل ارسال‌شده به دلایل مشخص پس از یک دقیقه حذف می‌شود. لطفاً جهت دریافت فایل آن را به پیام‌های ذخیره‌شده یا پیام خصوصی دوستان خود فوروارد کنید.');
-
-                // حذف فایل بعد از 1 دقیقه
-                setTimeout(async () => {
-                    try {
-                        await ctx.telegram.deleteMessage(ctx.chat.id, sentMessage.message_id);
-                    } catch (error) {
-                        console.error('Error deleting message:', error);
-                    }
-                }, 60000); // 1 minute
-
-                return;
+                
+                // به‌روزرسانی آمار دانلود
+                await databaseService.incrementFileDownloads(fileKey);
+                console.log(`✅ File sent to user: ${ctx.from.id}`);
+                
             } else {
-                console.log('❌ Invalid or expired file key');
-                await ctx.reply('❌ کلید پیام نامعتبر است یا منقضی شده است.');
-                return;
+                await ctx.reply('⚠️ فایل پیدا نشد! لطفاً کد را بررسی کنید.');
+            }
+        } else {
+            // اگر لینک دریافت فایل نبود، پیام خوش‌آمدگویی نمایش داده شود
+            const isMember = await checkUserMembership(ctx);
+            if (isMember) {
+                await ctx.reply('👋 به ربات شیوری خوش آمدید\n\nآدرس کانال: https://t.me/+x5guW0j8thxlMTQ0', { disable_web_page_preview: true });
+            } else {
+                const welcomeMessage = '👋 به ربات ما خوش آمدید!\n📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:';
+                await ctx.reply(welcomeMessage, getSubscriptionKeyboard());
             }
         }
-
-        // اگر لینک دریافت فایل نبود، پیام خوش‌آمدگویی نمایش داده شود
-        const isMember = await checkUserMembership(ctx);
-        if (isMember) {
-            await ctx.reply('👋 به ربات شیوری خوش آمدید\n\nآدرس کانال: https://t.me/+x5guW0j8thxlMTQ0', { disable_web_page_preview: true });
-        } else {
-            const welcomeMessage = '👋 به ربات ما خوش آمدید!\n📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:';
-            await ctx.reply(welcomeMessage, getSubscriptionKeyboard());
-        }
     } catch (error) {
-        console.error('Error handling start command:', error);
-        await ctx.reply('⚠️ خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        console.error('Error processing start command:', error.message);
+        await ctx.reply('⚠️ خطا در پردازش درخواست. لطفاً بعداً دوباره تلاش کنید.');
     }
 });
 
@@ -299,26 +284,27 @@ bot.action('check_membership', async (ctx) => {
                 // حذف لینک از لیست انتظار
                 pendingLinks.delete(ctx.from.id);
                 
-                // ارسال فایل مربوطه
-                const messageInfo = fileKeys.get(pendingLink);
-                if (messageInfo) {
+                // دریافت اطلاعات فایل از دیتابیس
+                const fileData = await databaseService.getFileByKey(pendingLink);
+                
+                if (fileData) {
                     let sentMessage;
                     // ارسال پیام بر اساس نوع آن
-                    switch (messageInfo.type) {
+                    switch (fileData.type) {
                         case 'document':
-                            sentMessage = await ctx.replyWithDocument(messageInfo.fileId);
+                            sentMessage = await ctx.replyWithDocument(fileData.fileId);
                             break;
                         case 'photo':
-                            sentMessage = await ctx.replyWithPhoto(messageInfo.fileId);
+                            sentMessage = await ctx.replyWithPhoto(fileData.fileId);
                             break;
                         case 'video':
-                            sentMessage = await ctx.replyWithVideo(messageInfo.fileId);
+                            sentMessage = await ctx.replyWithVideo(fileData.fileId);
                             break;
                         case 'audio':
-                            sentMessage = await ctx.replyWithAudio(messageInfo.fileId);
+                            sentMessage = await ctx.replyWithAudio(fileData.fileId);
                             break;
                         case 'text':
-                            sentMessage = await ctx.reply(messageInfo.text);
+                            sentMessage = await ctx.reply(fileData.text);
                             break;
                     }
 
@@ -333,6 +319,9 @@ bot.action('check_membership', async (ctx) => {
                             console.error('Error deleting message:', error);
                         }
                     }, 60000); // 1 minute
+                    
+                    // به‌روزرسانی آمار دانلود
+                    await databaseService.incrementFileDownloads(pendingLink);
                 } else {
                     await ctx.reply('❌ متأسفانه فایل مورد نظر منقضی شده است.');
                 }
@@ -410,6 +399,21 @@ bot.on('document', async (ctx) => {
             const botUsername = bot.botInfo?.username;
             const directLink = `https://t.me/${botUsername}?start=get_${fileKey}`;
             
+            // ذخیره اطلاعات فایل در دیتابیس
+            const fileData = {
+                key: fileKey,
+                messageId: ctx.message.message_id,
+                type: 'document',
+                fileId: file.file_id,
+                fileName: file.file_name,
+                fileSize: file.file_size,
+                date: Date.now(),
+                isActive: true,
+                downloads: 0
+            };
+            
+            await databaseService.createFile(fileData);
+            
             // Log file information in English
             const logMessage = `📥 New File Received\n\n` +
                 `File Name: ${file.file_name}\n` +
@@ -417,23 +421,11 @@ bot.on('document', async (ctx) => {
                 `File ID: ${file.file_id}\n` +
                 `File Key: ${fileKey}\n` +
                 `Direct Link: ${directLink}\n` +
-                `Date: ${new Date().toLocaleString('en-US')}\n\n` +
-                `📋 Stored Files:\n` +
-                Array.from(fileKeys.entries()).map(([key, info]) => 
-                    `Key: ${key} - Name: ${info.name} - Date: ${new Date(info.date).toLocaleString('en-US')}`
-                ).join('\n');
+                `Date: ${new Date().toLocaleString('en-US')}`;
 
             // Send log message to private channel
             await ctx.telegram.sendMessage(channelId, logMessage, {
                 parse_mode: 'HTML'
-            });
-
-            // Store file information
-            fileKeys.set(fileKey, {
-                fileId: file.file_id,
-                name: file.file_name,
-                size: file.file_size,
-                date: Date.now()
             });
 
             // Add key and direct link to file caption
@@ -451,24 +443,144 @@ bot.on('document', async (ctx) => {
     }
 });
 
-// راه‌اندازی بات
+// Store previously seen message IDs
+const channelMessages = new Map();
+
+// Track channel messages
+bot.on('channel_post', (ctx, next) => {
+    const chatId = ctx.chat.id;
+    const messageId = ctx.channelPost.message_id;
+    
+    if (chatId && messageId && chatId.toString() === config.PRIVATE_CHANNEL_ID.toString()) {
+        if (!channelMessages.has(chatId)) {
+            channelMessages.set(chatId, new Set());
+        }
+        channelMessages.get(chatId).add(messageId);
+    }
+    
+    return next();
+});
+
+// Listen for message deletions in channels
+// Note: This event is not officially documented in Telegraf but is supported in some cases
+bot.on('message_delete', async (ctx) => {
+    try {
+        const chatId = ctx.chat.id;
+        
+        if (chatId && chatId.toString() === config.PRIVATE_CHANNEL_ID.toString()) {
+            const messageIds = ctx.update?.message_delete?.message_ids || [];
+            
+            if (messageIds.length > 0) {
+                console.log(`\n🗑️ Message deletion detected directly: ${messageIds.join(', ')}`);
+                
+                // Remove from tracking
+                messageIds.forEach(id => {
+                    markMessageDeleted(channelMessages, chatId, id);
+                });
+                
+                // Process deletion in database
+                await fileHandlerService.handleDeletedMessages({ chat: { id: chatId } }, messageIds);
+            }
+        }
+    } catch (error) {
+        console.error('Error handling direct message deletion:', error);
+    }
+});
+
+// Telegram API doesn't provide deleted message events directly
+// Check for deleted messages periodically (every 5 minutes)
+setInterval(async () => {
+    const chatId = config.PRIVATE_CHANNEL_ID;
+    const messages = channelMessages.get(chatId);
+    
+    if (!messages || messages.size === 0) return;
+    
+    try {
+        // Get recent messages (up to 100)
+        const updates = await bot.telegram.getUpdates({ 
+            offset: -1,
+            limit: 100,
+            allowed_updates: ['channel_post']
+        });
+
+        // Create a set of current message IDs
+        const currentMessageIds = new Set();
+        
+        // Try to get channel messages directly
+        try {
+            const history = await bot.telegram.getChatHistory(chatId, { limit: 100 });
+            if (history && history.messages) {
+                history.messages.forEach(msg => {
+                    if (msg.message_id) {
+                        currentMessageIds.add(msg.message_id);
+                    }
+                });
+            }
+        } catch (err) {
+            console.log('Could not get chat history, using update method');
+            // Extract message IDs from updates if chat history not available
+            updates.forEach(update => {
+                if (update.channel_post && 
+                    update.channel_post.chat && 
+                    update.channel_post.chat.id.toString() === chatId.toString()) {
+                    currentMessageIds.add(update.channel_post.message_id);
+                }
+            });
+        }
+        
+        // Find deleted messages
+        const deletedMessageIds = [];
+        messages.forEach(messageId => {
+            if (!currentMessageIds.has(messageId)) {
+                deletedMessageIds.push(messageId);
+            }
+        });
+        
+        // Process deleted messages
+        if (deletedMessageIds.length > 0) {
+            console.log(`Detected ${deletedMessageIds.length} deleted messages`);
+            
+            // Remove deleted messages from tracking
+            deletedMessageIds.forEach(id => {
+                messages.delete(id);
+            });
+            
+            // Create a manual update object and trigger the handler
+            const ctx = {
+                chat: { id: chatId },
+                update: {
+                    channel_post_deleted: {
+                        message_ids: deletedMessageIds
+                    }
+                }
+            };
+            
+            bot.handleUpdate(ctx);
+        }
+    } catch (error) {
+        console.error('Error checking for deleted messages:', error);
+    }
+}, 5 * 60 * 1000); // Check every 5 minutes
+
+// Setup all bot handlers
+setupHandlers(bot);
+
+// Handle errors
+bot.catch((err, ctx) => {
+    console.error(`Error handling update ${ctx.update.update_id}:`, err);
+});
+
+// Start the bot
 bot.launch()
     .then(() => {
-        // بارگذاری کلیدها از فایل
-        loadFileKeys();
-        console.log('✅ Bot started successfully!');
-        console.log(`🤖 Bot Username: @${bot.botInfo?.username}`);
+        console.log('✅ Bot started successfully');
+        console.log(`🤖 Bot username: @${bot.botInfo.username}`);
     })
-    .catch((error) => {
-        console.error('❌ Error starting bot:', error);
+    .catch(err => {
+        console.error('❌ Failed to start bot:', err);
+        process.exit(1);
     });
 
-// فعال‌سازی graceful shutdown
-process.once('SIGINT', () => {
-    saveFileKeys(); // ذخیره کلیدها قبل از خروج
-    bot.stop('SIGINT');
-});
-process.once('SIGTERM', () => {
-    saveFileKeys(); // ذخیره کلیدها قبل از خروج
-    bot.stop('SIGTERM');
-});
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));

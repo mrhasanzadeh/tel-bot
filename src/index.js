@@ -1,17 +1,33 @@
+/**
+ * Main module exports for the Telegram bot
+ */
+
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const handleFile = require('./handlers/fileHandler');
 const handleStart = require('./handlers/startHandler');
 const logService = require('./services/logService');
+const databaseService = require('./services/databaseService');
+const fileHandlerService = require('./services/fileHandlerService');
+const membershipService = require('./services/membershipService');
+const { setupHandlers } = require('./handlers/botHandlers');
+const fileUtils = require('./utils/fileUtils');
+const uiUtils = require('./utils/uiUtils');
 
 // Disable SSL verification for development
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// Connect to database
+databaseService.connect().catch(error => {
+    console.error('❌ Failed to connect to database:', error);
+    process.exit(1);
+});
+
 // Log all channel posts
 bot.on('channel_post', async (ctx) => {
-    try {+
+    try {
         const chatId = ctx.chat.id;
         const channelId = process.env.PRIVATE_CHANNEL_ID;
         
@@ -51,4 +67,23 @@ bot.launch()
     })
     .catch((error) => {
         console.error('❌ Error starting bot:', error);
-    }); 
+    });
+
+// Handle bot shutdown
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+module.exports = {
+    services: {
+        databaseService,
+        fileHandlerService,
+        membershipService
+    },
+    handlers: {
+        setupHandlers
+    },
+    utils: {
+        fileUtils,
+        uiUtils
+    }
+}; 
