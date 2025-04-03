@@ -4,6 +4,7 @@ const config = require('../config');
 const fileHandlerService = require('../src/services/fileHandlerService');
 const { setupHandlers } = require('../src/handlers/botHandlers');
 const { markMessageDeleted } = require('../src/utils/fileUtils');
+const membershipService = require('../src/services/membershipService');
 
 // Validate required environment variables
 const requiredEnvVars = ['BOT_TOKEN', 'MONGODB_URI', 'PRIVATE_CHANNEL_ID', 'PUBLIC_CHANNEL_ID', 'PUBLIC_CHANNEL_USERNAME'];
@@ -14,13 +15,18 @@ if (missingEnvVars.length > 0) {
     throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
 }
 
+// Create HTTPS agent with SSL verification disabled
+const httpsAgent = new https.Agent({
+    rejectUnauthorized: false,
+    keepAlive: true,
+    timeout: 60000
+});
+
 // Initialize the bot with the token from config
 const bot = new Telegraf(config.BOT_TOKEN, {
     telegram: {
         apiRoot: 'https://api.telegram.org',
-        agent: new https.Agent({
-            rejectUnauthorized: false
-        })
+        agent: httpsAgent
     }
 });
 
@@ -33,6 +39,10 @@ const initializeBot = async () => {
             publicChannelId: config.PUBLIC_CHANNEL_ID,
             publicChannelUsername: config.PUBLIC_CHANNEL_USERNAME
         });
+        
+        // Set up membership service
+        membershipService.setTelegram(bot.telegram);
+        console.log('✅ Membership service initialized');
         
         // Store previously seen message IDs
         const channelMessages = new Map();

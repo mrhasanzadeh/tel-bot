@@ -59,21 +59,11 @@ bot.command('start', handleStart);
 // Handle file messages in channel
 bot.on('channel_post', handleFile);
 
-// Start bot
-bot.launch()
-    .then(() => {
-        console.log('✅ Bot started successfully!');
-        console.log(`🤖 Bot Username: @${bot.botInfo?.username}`);
-    })
-    .catch((error) => {
-        console.error('❌ Error starting bot:', error);
-    });
-
-// Handle bot shutdown
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+// Setup all bot handlers
+setupHandlers(bot);
 
 module.exports = {
+    bot,
     services: {
         databaseService,
         fileHandlerService,

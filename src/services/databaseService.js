@@ -16,6 +16,8 @@ class DatabaseService {
         }
         DatabaseService.instance = this;
         this.isConnected = false;
+        this.connectionAttempts = 0;
+        this.maxConnectionAttempts = 3;
     }
 
     /**
@@ -48,22 +50,53 @@ class DatabaseService {
                 retryWrites: true,
                 w: 'majority',
                 maxPoolSize: 10,
-                minPoolSize: 5
+                minPoolSize: 5,
+                heartbeatFrequencyMS: 10000,
+                retryReads: true
             });
 
             console.log('✅ Successfully connected to MongoDB');
+            this.isConnected = true;
+            this.connectionAttempts = 0;
             
             mongoose.connection.on('error', (err) => {
                 console.error('❌ MongoDB connection error:', err);
+                this.isConnected = false;
             });
 
             mongoose.connection.on('disconnected', () => {
                 console.warn('⚠️ MongoDB disconnected');
+                this.isConnected = false;
+            });
+
+            mongoose.connection.on('reconnected', () => {
+                console.log('✅ MongoDB reconnected');
+                this.isConnected = true;
             });
 
         } catch (error) {
-            console.error('❌ Failed to connect to MongoDB:', error);
+            this.connectionAttempts++;
+            console.error(`❌ Failed to connect to MongoDB (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts}):`, error);
+            
+            if (this.connectionAttempts < this.maxConnectionAttempts) {
+                console.log(`🔄 Retrying connection in 5 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                return this.connect();
+            }
+            
             throw error;
+        }
+    }
+
+    /**
+     * Ensure database connection is active
+     * @private
+     * @returns {Promise<void>}
+     */
+    async _ensureConnection() {
+        if (!this.isConnected) {
+            console.log('🔄 Reconnecting to MongoDB...');
+            await this.connect();
         }
     }
 
@@ -75,6 +108,7 @@ class DatabaseService {
      */
     async createFile(fileData) {
         try {
+            await this._ensureConnection();
             const file = new File(fileData);
             await file.save();
             console.log(`✅ File saved with key: ${fileData.key}`);
@@ -93,7 +127,12 @@ class DatabaseService {
      */
     async getFileByKey(key) {
         try {
-            return await File.findOne({ key, isActive: true });
+            await this._ensureConnection();
+            const file = await File.findOne({ key, isActive: true });
+            if (!file) {
+                console.log(`⚠️ File not found with key: ${key}`);
+            }
+            return file;
         } catch (error) {
             console.error(`❌ Error getting file with key ${key}:`, error);
             throw error;
@@ -108,8 +147,12 @@ class DatabaseService {
      */
     async incrementFileDownloads(key) {
         try {
+            await this._ensureConnection();
             const file = await File.findOne({ key, isActive: true });
-            if (!file) return null;
+            if (!file) {
+                console.log(`⚠️ File not found for download increment: ${key}`);
+                return null;
+            }
             
             file.downloads += 1;
             file.lastAccessed = new Date();

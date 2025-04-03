@@ -59,10 +59,36 @@ class FileService {
             const newCaption = `${caption}\n\n🔑 Key: ${fileKey}\n📱 Direct Link: ${directLink}`;
             
             try {
-                await ctx.telegram.editMessageCaption(ctx.chat.id, ctx.channelPost.message_id, null, newCaption);
-                console.log('✅ Caption updated successfully');
+                // Check if bot is admin and can edit messages
+                const chatMember = await ctx.telegram.getChatMember(ctx.chat.id, ctx.botInfo.id);
+                const isAdmin = chatMember.status === 'administrator';
+                const canEditMessages = chatMember.can_edit_messages;
+
+                if (isAdmin && canEditMessages) {
+                    await ctx.telegram.editMessageCaption(ctx.chat.id, ctx.channelPost.message_id, null, newCaption);
+                    console.log('✅ Caption updated successfully');
+                } else {
+                    // If bot can't edit messages, send a new message with the information
+                    await ctx.telegram.sendMessage(
+                        ctx.chat.id,
+                        `📎 File Information:\n\n🔑 Key: ${fileKey}\n📱 Direct Link: ${directLink}\n📅 Date: ${new Date().toLocaleString('en-US')}`,
+                        { reply_to_message_id: ctx.channelPost.message_id }
+                    );
+                    console.log('ℹ️ Sent file information in a new message');
+                }
             } catch (error) {
-                console.error('Error updating caption:', error.message);
+                console.error('Error handling caption:', error.message);
+                // Send a new message with the information if editing fails
+                try {
+                    await ctx.telegram.sendMessage(
+                        ctx.chat.id,
+                        `📎 File Information:\n\n🔑 Key: ${fileKey}\n📱 Direct Link: ${directLink}\n📅 Date: ${new Date().toLocaleString('en-US')}`,
+                        { reply_to_message_id: ctx.channelPost.message_id }
+                    );
+                    console.log('ℹ️ Sent file information in a new message after error');
+                } catch (sendError) {
+                    console.error('Error sending file information:', sendError.message);
+                }
             }
 
             return fileKey;
