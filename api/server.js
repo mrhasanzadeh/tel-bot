@@ -25,7 +25,8 @@ const httpsAgent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTT
 // Initialize bot with token
 const bot = new Telegraf(process.env.BOT_TOKEN, {
     telegram: {
-        agent: httpsAgent
+        agent: httpsAgent,
+        apiRoot: 'https://api.telegram.org'
     }
 });
 
@@ -75,8 +76,13 @@ bot.catch((error, ctx) => {
     console.error('Error details:', {
         message: error.message,
         stack: error.stack,
-        code: error.code
+        code: error.code,
+        description: error.description
     });
+    
+    if (error.response) {
+        console.error('Telegram API Response:', error.response.data);
+    }
     
     if (ctx) {
         ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.')
@@ -92,9 +98,14 @@ bot.launch()
         console.log('✅ Bot started successfully');
         console.log(`👤 Bot username: @${bot.botInfo.username}`);
         console.log(`📢 Tracking messages in private channel: ${process.env.PRIVATE_CHANNEL_ID}`);
+        console.log(`📢 Public channel ID: ${process.env.PUBLIC_CHANNEL_ID}`);
+        console.log(`📢 Public channel username: @${process.env.PUBLIC_CHANNEL_USERNAME}`);
     })
     .catch(error => {
         console.error('❌ Error starting bot:', error);
+        if (error.response) {
+            console.error('Telegram API Response:', error.response.data);
+        }
         process.exit(1);
     });
 

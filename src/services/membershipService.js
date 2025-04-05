@@ -36,7 +36,13 @@ class MembershipService {
                 return false;
             }
 
+            if (!process.env.PUBLIC_CHANNEL_ID) {
+                console.error('❌ PUBLIC_CHANNEL_ID environment variable is not set');
+                return false;
+            }
+
             console.log(`🔍 Checking membership for user ${userId}`);
+            console.log(`📢 Checking membership in channel ${process.env.PUBLIC_CHANNEL_ID}`);
             
             // Get the chat member status
             const chatMember = await this.telegram.telegram.getChatMember(
@@ -52,6 +58,9 @@ class MembershipService {
             return isMember;
         } catch (error) {
             console.error('❌ Error checking membership:', error);
+            if (error.response) {
+                console.error('Telegram API Response:', error.response.data);
+            }
             return false;
         }
     }
