@@ -627,35 +627,16 @@ bot.catch((err, ctx) => {
 });
 
 // Start the bot
-if (process.env.VERCEL) {
-    // In Vercel, we use webhooks
-    console.log('🚀 Starting bot in webhook mode for Vercel deployment');
-    
-    // Export the webhook handler for Vercel
-    module.exports = async (req, res) => {
-        try {
-            // Handle webhook request
-            await bot.handleUpdate(req.body);
-            res.status(200).send('OK');
-        } catch (error) {
-            console.error('Error handling webhook update:', error);
-            res.status(500).send('Error handling update');
-        }
-    };
-} else {
-    // In development, use polling
-    console.log('🚀 Starting bot in polling mode for development');
-    bot.launch()
-        .then(() => {
-            console.log('✅ Bot started successfully');
-            console.log(`🤖 Bot username: @${bot.botInfo.username}`);
-        })
-        .catch(err => {
-            console.error('❌ Failed to start bot:', err);
-            process.exit(1);
-        });
+bot.launch()
+    .then(() => {
+        console.log('✅ Bot started successfully');
+        console.log(`🤖 Bot username: @${bot.botInfo.username}`);
+    })
+    .catch(err => {
+        console.error('❌ Failed to start bot:', err);
+        process.exit(1);
+    });
 
-    // Enable graceful stop
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
-}
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));

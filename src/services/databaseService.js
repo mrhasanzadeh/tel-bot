@@ -18,9 +18,6 @@ class DatabaseService {
         this.isConnected = false;
         this.connectionAttempts = 0;
         this.maxConnectionAttempts = 3;
-        this.isConnecting = false;
-        this.retryCount = 0;
-        this.maxRetries = 5;
     }
 
     /**
@@ -30,87 +27,65 @@ class DatabaseService {
      */
     async connect() {
         try {
+            if (mongoose.connection.readyState === 1) {
+                console.log('✅ Already connected to MongoDB');
+                return;
+            }
+
+            // Check if MongoDB URI is available
+            if (!config.MONGODB_URI) {
+                throw new Error('MONGODB_URI environment variable is not set');
+            }
+
             console.log('🔄 Attempting to connect to MongoDB...');
-            console.log(`📝 Connection string: ${this.uri}`);
+            // Safely log the connection string without credentials
+            const connectionString = config.MONGODB_URI;
+            const maskedUri = connectionString.replace(/(mongodb:\/\/)([^:]+):([^@]+)@/, '$1****:****@');
+            console.log('📝 Connection string:', maskedUri);
             
-            // Set connection options with retry logic
-            const options = {
-                useNewUrlParser: true,
-                useUnifiedTopology: true,
-                serverSelectionTimeoutMS: 10000, // 10 seconds
-                socketTimeoutMS: 45000, // 45 seconds
-                connectTimeoutMS: 10000, // 10 seconds
+            await mongoose.connect(config.MONGODB_URI, {
+                serverSelectionTimeoutMS: 10000,
+                socketTimeoutMS: 45000,
+                family: 4, // Force IPv4
                 retryWrites: true,
-                retryReads: true,
+                w: 'majority',
                 maxPoolSize: 10,
                 minPoolSize: 5,
-                maxIdleTimeMS: 30000, // 30 seconds
-                heartbeatFrequencyMS: 10000, // 10 seconds
-                // Add these options to help with connection issues
-                ssl: true,
-                sslValidate: false,
-                directConnection: false,
-                // Add these options to help with replica set issues
-                replicaSet: 'atlas-biiz9a-shard-0',
-                readPreference: 'primaryPreferred'
-            };
-            
-            // Connect to MongoDB
-            await mongoose.connect(this.uri, options);
-            
-            console.log('✅ Connected to MongoDB successfully');
-            
-            // Set up connection event handlers
-            mongoose.connection.on('disconnected', () => {
-                console.log('❌ MongoDB disconnected. Attempting to reconnect...');
-                this.reconnect();
+                heartbeatFrequencyMS: 10000,
+                retryReads: true
             });
+
+            console.log('✅ Successfully connected to MongoDB');
+            this.isConnected = true;
+            this.connectionAttempts = 0;
             
             mongoose.connection.on('error', (err) => {
                 console.error('❌ MongoDB connection error:', err);
-                this.reconnect();
+                this.isConnected = false;
             });
-            
-            return true;
+
+            mongoose.connection.on('disconnected', () => {
+                console.warn('⚠️ MongoDB disconnected');
+                this.isConnected = false;
+            });
+
+            mongoose.connection.on('reconnected', () => {
+                console.log('✅ MongoDB reconnected');
+                this.isConnected = true;
+            });
+
         } catch (error) {
-            console.error('❌ Failed to connect to MongoDB:', error);
+            this.connectionAttempts++;
+            console.error(`❌ Failed to connect to MongoDB (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts}):`, error);
             
-            // Provide more detailed error information
-            if (error.name === 'MongooseServerSelectionError') {
-                console.error('🔍 This error often occurs when your IP address is not whitelisted in MongoDB Atlas.');
-                console.error('🔍 Please add your IP address to the MongoDB Atlas whitelist:');
-                console.error('🔍 1. Go to MongoDB Atlas dashboard');
-                console.error('🔍 2. Navigate to Network Access');
-                console.error('🔍 3. Click "Add IP Address"');
-                console.error('🔍 4. Add your IP address or use "Allow Access from Anywhere" (0.0.0.0/0) for testing');
+            if (this.connectionAttempts < this.maxConnectionAttempts) {
+                console.log(`🔄 Retrying connection in 5 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                return this.connect();
             }
             
-            // Retry connection
-            this.reconnect();
-            return false;
+            throw error;
         }
-    }
-
-    // Reconnect to MongoDB with exponential backoff
-    async reconnect() {
-        if (this.isConnecting) return;
-        
-        this.isConnecting = true;
-        this.retryCount++;
-        
-        if (this.retryCount > this.maxRetries) {
-            console.error(`❌ Failed to connect to MongoDB after ${this.maxRetries} attempts. Giving up.`);
-            this.isConnecting = false;
-            return;
-        }
-        
-        const delay = Math.min(1000 * Math.pow(2, this.retryCount - 1), 30000); // Exponential backoff with max 30 seconds
-        console.log(`🔄 Retrying connection in ${delay / 1000} seconds... (attempt ${this.retryCount}/${this.maxRetries})`);
-        
-        setTimeout(async () => {
-            this.isConnecting = false;
-            await this.connect();
-        }, delay);
     }
 
     /**
