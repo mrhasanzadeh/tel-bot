@@ -1,118 +1,105 @@
 const { Telegraf } = require('telegraf');
-const https = require('https');
-const config = require('../config');
-const fileHandlerService = require('../src/services/fileHandlerService');
-const { setupHandlers } = require('../src/handlers/botHandlers');
-const { markMessageDeleted } = require('../src/utils/fileUtils');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const membershipService = require('../src/services/membershipService');
+const { setupHandlers } = require('../src/handlers/botHandlers');
+const databaseService = require('../src/services/databaseService');
 
 // Validate required environment variables
-const requiredEnvVars = ['BOT_TOKEN', 'MONGODB_URI', 'PRIVATE_CHANNEL_ID', 'PUBLIC_CHANNEL_ID', 'PUBLIC_CHANNEL_USERNAME'];
-const missingEnvVars = requiredEnvVars.filter(varName => !config[varName]);
+const requiredEnvVars = [
+    'BOT_TOKEN',
+    'MONGODB_URI',
+    'PRIVATE_CHANNEL_ID',
+    'PUBLIC_CHANNEL_ID',
+    'PUBLIC_CHANNEL_USERNAME'
+];
 
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingEnvVars.length > 0) {
-    console.error('❌ Missing required environment variables:', missingEnvVars);
-    throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    process.exit(1);
 }
 
-// Create HTTPS agent with SSL verification disabled
-const httpsAgent = new https.Agent({
-    rejectUnauthorized: false,
-    keepAlive: true,
-    timeout: 60000
-});
+// Create HTTPS agent for proxy support if needed
+const httpsAgent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTTPS_PROXY) : null;
 
-// Initialize the bot with the token from config
-const bot = new Telegraf(config.BOT_TOKEN, {
+// Initialize bot with token
+const bot = new Telegraf(process.env.BOT_TOKEN, {
     telegram: {
-        apiRoot: 'https://api.telegram.org',
         agent: httpsAgent
     }
 });
 
-// Initialize bot
-const initializeBot = async () => {
+// Set up membership service with bot instance
+membershipService.setTelegram(bot);
+
+// Connect to MongoDB
+databaseService.connect()
+    .then(() => {
+        console.log('✅ Connected to MongoDB');
+    })
+    .catch(error => {
+        console.error('❌ MongoDB connection error:', error);
+        process.exit(1);
+    });
+
+// Set up message tracking for private channel
+const messageTracker = new Map();
+
+// Handle message deletions in private channel
+bot.on('message_delete', async (ctx) => {
     try {
-        console.log('🚀 Initializing bot...');
-        console.log('📝 Bot configuration:', {
-            privateChannelId: config.PRIVATE_CHANNEL_ID,
-            publicChannelId: config.PUBLIC_CHANNEL_ID,
-            publicChannelUsername: config.PUBLIC_CHANNEL_USERNAME
-        });
+        const chatId = ctx.chat.id;
         
-        // Set up membership service
-        membershipService.setTelegram(bot.telegram);
-        console.log('✅ Membership service initialized');
-        
-        // Store previously seen message IDs
-        const channelMessages = new Map();
-
-        // Track channel messages
-        bot.on('channel_post', (ctx, next) => {
-            const chatId = ctx.chat.id;
-            const messageId = ctx.channelPost.message_id;
+        if (chatId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+            const messageIds = ctx.update?.message_delete?.message_ids || [];
             
-            if (chatId && messageId && chatId.toString() === config.PRIVATE_CHANNEL_ID.toString()) {
-                if (!channelMessages.has(chatId)) {
-                    channelMessages.set(chatId, new Set());
+            if (messageIds.length > 0) {
+                console.log(`🗑️ Processing ${messageIds.length} deleted messages`);
+                for (const messageId of messageIds) {
+                    await databaseService.deactivateFilesByMessageId(messageId);
                 }
-                channelMessages.get(chatId).add(messageId);
-                console.log(`📝 Tracking new channel message: ${messageId}`);
+                console.log('✅ Successfully processed deleted messages');
             }
-            
-            return next();
-        });
-
-        // Listen for message deletions in channels
-        bot.on('message_delete', async (ctx) => {
-            try {
-                const chatId = ctx.chat.id;
-                
-                if (chatId && chatId.toString() === config.PRIVATE_CHANNEL_ID.toString()) {
-                    const messageIds = ctx.update?.message_delete?.message_ids || [];
-                    
-                    if (messageIds.length > 0) {
-                        console.log(`\n🗑️ Message deletion detected directly: ${messageIds.join(', ')}`);
-                        
-                        // Remove from tracking
-                        messageIds.forEach(id => {
-                            markMessageDeleted(channelMessages, chatId, id);
-                        });
-                        
-                        // Process deletion in database
-                        await fileHandlerService.handleDeletedMessages({ chat: { id: chatId } }, messageIds);
-                    }
-                }
-            } catch (error) {
-                console.error('Error handling direct message deletion:', error);
-            }
-        });
-
-        // Setup all bot handlers
-        setupHandlers(bot);
-
-        // Handle errors
-        bot.catch((err, ctx) => {
-            console.error(`❌ Error handling update ${ctx.update.update_id}:`, {
-                error: err,
-                update: ctx.update,
-                type: err.name,
-                code: err.code
-            });
-        });
-
-        console.log('✅ Bot initialized successfully');
+        }
     } catch (error) {
-        console.error('❌ Failed to initialize bot:', error);
-        throw error;
+        console.error('❌ Error handling message deletion:', error);
     }
-};
-
-// Initialize the bot
-initializeBot().catch(error => {
-    console.error('❌ Fatal error during bot initialization:', error);
-    process.exit(1);
 });
 
-// Export the bot instance
+// Set up bot handlers
+setupHandlers(bot);
+
+// Handle errors
+bot.catch((error, ctx) => {
+    console.error('❌ Bot error:', error);
+    console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code
+    });
+    
+    if (ctx) {
+        ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.')
+            .catch(replyError => {
+                console.error('❌ Error sending error message:', replyError);
+            });
+    }
+});
+
+// Start the bot
+bot.launch()
+    .then(() => {
+        console.log('✅ Bot started successfully');
+        console.log(`👤 Bot username: @${bot.botInfo.username}`);
+        console.log(`📢 Tracking messages in private channel: ${process.env.PRIVATE_CHANNEL_ID}`);
+    })
+    .catch(error => {
+        console.error('❌ Error starting bot:', error);
+        process.exit(1);
+    });
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
 module.exports = bot; 

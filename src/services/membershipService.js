@@ -18,42 +18,40 @@ class MembershipService {
 
     /**
      * Set the Telegram bot instance
-     * @param {Object} telegram - Telegram bot instance
+     * @param {Object} bot - Telegraf bot instance
      */
-    setTelegram(telegram) {
-        this.telegram = telegram;
+    setTelegram(bot) {
+        this.telegram = bot;
     }
 
     /**
      * Check if a user is a member of the required channel
-     * @param {number} userId - The user's Telegram ID
+     * @param {number} userId - Telegram user ID
      * @returns {Promise<boolean>} Whether the user is a member
      */
     async isMember(userId) {
         try {
             if (!this.telegram) {
-                console.error('❌ Telegram instance not set in membership service');
+                console.error('❌ Telegram bot instance not set in membership service');
                 return false;
             }
 
-            const channelId = config.PUBLIC_CHANNEL_ID;
-            console.log(`🔍 Checking membership for user ${userId} in channel ${channelId}`);
-
-            try {
-                const chatMember = await this.telegram.getChatMember(channelId, userId);
-                const isMember = ['member', 'administrator', 'creator'].includes(chatMember.status);
-                console.log(`✅ Membership check result for user ${userId}: ${isMember}`);
-                return isMember;
-            } catch (error) {
-                if (error.response?.error_code === 400 && error.response?.description?.includes('chat not found')) {
-                    console.error('❌ Bot cannot access the channel. Please ensure the bot is added to the channel.');
-                    return false;
-                }
-                console.error('❌ Error checking membership:', error);
-                return false;
-            }
+            console.log(`🔍 Checking membership for user ${userId}`);
+            
+            // Get the chat member status
+            const chatMember = await this.telegram.telegram.getChatMember(
+                process.env.PUBLIC_CHANNEL_ID,
+                userId
+            );
+            
+            // Check if the user is a member, administrator, or creator
+            const isMember = ['member', 'administrator', 'creator'].includes(chatMember.status);
+            
+            console.log(`👤 User ${userId} membership status: ${chatMember.status} (isMember: ${isMember})`);
+            
+            return isMember;
         } catch (error) {
-            console.error('❌ Error in membership check:', error);
+            console.error('❌ Error checking membership:', error);
             return false;
         }
     }

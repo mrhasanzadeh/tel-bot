@@ -9,7 +9,7 @@
  * 5. Files are automatically deactivated when posts are deleted
  */
 
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const https = require('https');
 const config = require('./config');
 const databaseService = require('./src/services/databaseService');
@@ -53,10 +53,10 @@ function generateFileKey() {
 }
 
 // ایجاد دکمه‌های شیشه‌ای
-const getSubscriptionKeyboard = () => {
+const getSubscriptionKeyboard = (userId) => {
     return Markup.inlineKeyboard([
         [Markup.button.url('📢 عضویت در کانال', `https://t.me/${config.PUBLIC_CHANNEL_USERNAME}`)],
-        [Markup.button.callback('✅ بررسی عضویت', 'check_membership')]
+        [Markup.button.callback('✅ بررسی عضویت', `check_membership_${userId}`)]
     ]);
 };
 
@@ -79,9 +79,9 @@ async function sendNotMemberMessage(ctx) {
     try {
         if (ctx.callbackQuery) {
             await ctx.answerCbQuery('⚠️ هنوز توی بعضی از کانال‌ها عضو نشدی! لطفاً توی همه عضو شو، بعد دکمه رو بزن.', { show_alert: true, cache_time: 0 });
-            await ctx.editMessageText('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard());
+            await ctx.editMessageText('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
         } else {
-            await ctx.reply('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard());
+            await ctx.reply('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
         }
     } catch (error) {
         console.error('Error sending not member message:', error);
@@ -215,7 +215,12 @@ bot.command('start', async (ctx) => {
                 // ذخیره لینک برای کاربر
                 pendingLinks.set(ctx.from.id, fileKey);
                 console.log(`User is not a member. Link saved for user ${ctx.from.id}`);
-                await sendNotMemberMessage(ctx);
+                
+                // Show join button
+                await ctx.reply(
+                    'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
+                    getSubscriptionKeyboard(ctx.from.id)
+                );
                 return;
             }
             
@@ -251,7 +256,7 @@ bot.command('start', async (ctx) => {
                 await databaseService.incrementFileDownloads(fileKey);
                 
                 // ارسال پیام هشدار پس از ارسال فایل
-                const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
+                const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
                 
                 // حذف فایل از چت پس از ۳۰ ثانیه
                 setTimeout(async () => {
@@ -290,7 +295,7 @@ bot.command('start', async (ctx) => {
             }
         } else {
             // پیام خوش‌آمدگویی به کاربر جدید
-            await ctx.reply(`🌹 سلام ${ctx.from.first_name}!\n\n🤖 به ربات آپلودر خوش آمدید.\n\n🔍 فایل‌های مورد نظر خود را می‌توانید از طریق لینک‌های مستقیم دریافت کنید.`);
+            await ctx.reply(`🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال ما: https://t.me/+vpEy9XrQjMw2N2E0`, { disable_web_page_preview: true });
         }
     } catch (error) {
         console.error('Error in start command handler:', error);
@@ -299,18 +304,19 @@ bot.command('start', async (ctx) => {
 });
 
 // پردازش کلیک روی دکمه بررسی عضویت
-bot.action('check_membership', async (ctx) => {
+bot.action(/^check_membership_(\d+)$/, async (ctx) => {
     try {
+        const userId = ctx.match[1];
         const isMember = await checkUserMembership(ctx);
         if (isMember) {
             // حذف پیام قبلی
             await ctx.deleteMessage();
             
             // بررسی آیا کاربر لینک مستقیمی ارسال کرده بود
-            const pendingLink = pendingLinks.get(ctx.from.id);
+            const pendingLink = pendingLinks.get(userId);
             if (pendingLink) {
                 // حذف لینک از لیست انتظار
-                pendingLinks.delete(ctx.from.id);
+                pendingLinks.delete(userId);
                 
                 // دریافت اطلاعات فایل از دیتابیس
                 const fileData = await databaseService.getFileByKey(pendingLink);
@@ -337,14 +343,36 @@ bot.action('check_membership', async (ctx) => {
                     }
 
                     // ارسال پیام هشدار
-                    await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n✅ جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.');
+                    const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
 
                     // حذف فایل بعد از ۳۰ ثانیه
                     setTimeout(async () => {
                         try {
-                            await ctx.telegram.deleteMessage(ctx.chat.id, sentMessage.message_id);
+                            // حذف پیام فایل
+                            try {
+                                await ctx.deleteMessage(sentMessage.message_id);
+                                console.log(`Deleted file message ${sentMessage.message_id} after 30 seconds`);
+                            } catch (fileError) {
+                                if (fileError.description && fileError.description.includes('message to delete not found')) {
+                                    console.log(`File message ${sentMessage.message_id} already deleted`);
+                                } else {
+                                    console.error(`Error deleting file message ${sentMessage.message_id}:`, fileError);
+                                }
+                            }
+                            
+                            // حذف پیام هشدار
+                            try {
+                                await ctx.deleteMessage(warningMessage.message_id);
+                                console.log(`Deleted warning message ${warningMessage.message_id} after 30 seconds`);
+                            } catch (warnError) {
+                                if (warnError.description && warnError.description.includes('message to delete not found')) {
+                                    console.log(`Warning message ${warningMessage.message_id} already deleted`);
+                                } else {
+                                    console.error(`Error deleting warning message ${warningMessage.message_id}:`, warnError);
+                                }
+                            }
                         } catch (error) {
-                            console.error('Error deleting message:', error);
+                            console.error('General error in message deletion timeout:', error);
                         }
                     }, 30000); // 30000 میلی‌ثانیه = 30 ثانیه
                     
@@ -361,7 +389,7 @@ bot.action('check_membership', async (ctx) => {
             await ctx.answerCbQuery('⚠️ هنوز توی بعضی از کانال‌ها عضو نشدی! لطفاً توی همه عضو شو، بعد دکمه رو بزن.', { show_alert: true, cache_time: 0 });
             try {
                 await ctx.editMessageText('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', {
-                    ...getSubscriptionKeyboard(),
+                    ...getSubscriptionKeyboard(ctx.from.id),
                     chat_id: ctx.chat.id,
                     message_id: ctx.callbackQuery.message.message_id
                 });

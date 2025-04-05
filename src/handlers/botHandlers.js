@@ -1,6 +1,5 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
-const { sendNotMemberMessage } = require('../utils/uiUtils');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -57,7 +56,30 @@ function setupHandlers(bot) {
             if (text.startsWith('get_')) {
                 const fileKey = text.replace('get_', '');
                 console.log(`🔍 Processing file request for key: ${fileKey}`);
-                await fileHandlerService.sendFileToUser(ctx, fileKey);
+                
+                // Check if user is a member
+                const isMember = await membershipService.isMember(ctx.from.id);
+                
+                if (isMember) {
+                    await fileHandlerService.sendFileToUser(ctx, fileKey);
+                } else {
+                    // Store the file request for later
+                    pendingLinks.set(ctx.from.id, fileKey);
+                    console.log(`📝 Stored pending file request for user ${ctx.from.id}`);
+                    
+                    // Show join button
+                    const joinButton = {
+                        inline_keyboard: [[
+                            { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
+                            { text: '✅ بررسی عضویت', callback_data: `check_membership_${ctx.from.id}` }
+                        ]]
+                    };
+
+                    await ctx.reply(
+                        'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
+                        { reply_markup: joinButton }
+                    );
+                }
             }
         } catch (error) {
             console.error('❌ Error handling file request:', error);
