@@ -141,27 +141,17 @@ class FileHandlerService {
         }
     }
 
-    async checkAndDeleteMessages(chatId) {
+    /**
+     * Get file by its key
+     * @param {string} fileKey - The file key
+     * @returns {Promise<Object|null>} File object or null if not found
+     */
+    async getFileByKey(fileKey) {
         try {
-            const pendingDeletions = await databaseService.getPendingDeletions(chatId);
-            const now = new Date();
-
-            for (const deletion of pendingDeletions) {
-                if (deletion.deleteAt <= now) {
-                    // Delete messages
-                    for (const messageId of deletion.messageIds) {
-                        try {
-                            await this.bot.telegram.deleteMessage(chatId, messageId);
-                        } catch (error) {
-                            console.error(`Error deleting message ${messageId}:`, error);
-                        }
-                    }
-                    // Remove from database
-                    await databaseService.removeMessageDeletion(deletion._id);
-                }
-            }
+            return await databaseService.getFileByKey(fileKey);
         } catch (error) {
-            console.error('Error checking message deletions:', error);
+            console.error('Error getting file by key:', error);
+            return null;
         }
     }
 

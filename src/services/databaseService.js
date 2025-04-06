@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 const File = require('../models/File');
 const config = require('../../config');
-const MessageDeletion = require('../models/MessageDeletion');
 
 /**
  * Service for database operations
@@ -239,54 +238,25 @@ class DatabaseService {
     /**
      * Deactivate files by their message ID
      * @param {number} messageId - The Telegram message ID
-     * @returns {Promise<number>} Number of deactivated files
+     * @returns {Promise<Object>} Updated file objects
      * @throws {Error} If update fails
      */
     async deactivateFilesByMessageId(messageId) {
         try {
+            await this._ensureConnection();
             const result = await File.updateMany(
-                { messageId, isActive: true },
-                { isActive: false, lastAccessed: new Date() }
+                { messageId },
+                { isActive: false }
             );
-            
-            return result.modifiedCount;
+            console.log(`✅ Deactivated ${result.modifiedCount} files for message ${messageId}`);
+            return result;
         } catch (error) {
-            console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
-            throw error;
-        }
-    }
-
-    async addMessageDeletion(deletionData) {
-        try {
-            const deletion = new MessageDeletion(deletionData);
-            await deletion.save();
-            return deletion;
-        } catch (error) {
-            console.error('Error adding message deletion:', error);
-            throw error;
-        }
-    }
-
-    async getPendingDeletions(chatId) {
-        try {
-            return await MessageDeletion.find({
-                chatId,
-                deleteAt: { $lte: new Date() }
-            });
-        } catch (error) {
-            console.error('Error getting pending deletions:', error);
-            throw error;
-        }
-    }
-
-    async removeMessageDeletion(deletionId) {
-        try {
-            await MessageDeletion.findByIdAndDelete(deletionId);
-        } catch (error) {
-            console.error('Error removing message deletion:', error);
+            console.error(`❌ Error deactivating files for message ${messageId}:`, error);
             throw error;
         }
     }
 }
 
-module.exports = new DatabaseService(); 
+// Create and export a single instance of the service
+const databaseService = new DatabaseService();
+module.exports = databaseService; 
