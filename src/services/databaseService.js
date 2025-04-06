@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const File = require('../models/File');
 const config = require('../../config');
+const MessageDeletion = require('../models/MessageDeletion');
 
 /**
  * Service for database operations
@@ -251,6 +252,38 @@ class DatabaseService {
             return result.modifiedCount;
         } catch (error) {
             console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
+            throw error;
+        }
+    }
+
+    async addMessageDeletion(deletionData) {
+        try {
+            const deletion = new MessageDeletion(deletionData);
+            await deletion.save();
+            return deletion;
+        } catch (error) {
+            console.error('Error adding message deletion:', error);
+            throw error;
+        }
+    }
+
+    async getPendingDeletions(chatId) {
+        try {
+            return await MessageDeletion.find({
+                chatId,
+                deleteAt: { $lte: new Date() }
+            });
+        } catch (error) {
+            console.error('Error getting pending deletions:', error);
+            throw error;
+        }
+    }
+
+    async removeMessageDeletion(deletionId) {
+        try {
+            await MessageDeletion.findByIdAndDelete(deletionId);
+        } catch (error) {
+            console.error('Error removing message deletion:', error);
             throw error;
         }
     }
