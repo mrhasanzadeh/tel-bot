@@ -111,26 +111,25 @@ class FileHandlerService {
             }
 
             // Forward the file without caption
-            const forwardedMsg = await ctx.copyMessage(ctx.chat.id, {
-                from_chat_id: process.env.PRIVATE_CHANNEL_ID,
-                message_id: file.messageId,
-                caption: '' // Remove caption when forwarding
+            const forwardedMessage = await ctx.copyMessage(ctx.from.id, file.messageId, {
+                caption: ''
             });
 
-            // Send warning message as a new message
-            const warningMsg = await ctx.reply('⚠️ این پیام بعد از 30 ثانیه حذف خواهد شد.');
+            // Send warning message
+            const warningMessage = await ctx.reply('⚠️ این پیام بعد از ۳۰ ثانیه حذف خواهد شد.');
 
             // Store deletion info in database
+            const deletionTime = new Date(Date.now() + 30000); // 30 seconds from now
             await databaseService.addPendingDeletion({
-                chatId: ctx.chat.id,
-                messageIds: [forwardedMsg.message_id, warningMsg.message_id],
-                deleteAt: new Date(Date.now() + 30000) // 30 seconds from now
+                chatId: ctx.from.id,
+                messageIds: [forwardedMessage.message_id, warningMessage.message_id],
+                deletionTime: deletionTime
             });
 
             return true;
         } catch (error) {
             console.error('Error in sendFileToUser:', error);
-            return ctx.reply('❌ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
+            return false;
         }
     }
 

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const File = require('../models/File');
+const PendingDeletion = require('../models/PendingDeletion');
 const config = require('../../config');
 
 /**
@@ -255,44 +256,56 @@ class DatabaseService {
         }
     }
 
-    async addPendingDeletion(deletionInfo) {
+    /**
+     * Add a pending deletion record
+     * @param {Object} deletionData - The deletion data
+     * @returns {Promise<Object>} Created pending deletion object
+     * @throws {Error} If creation fails
+     */
+    async addPendingDeletion(deletionData) {
         try {
-            const collection = this.db.collection('pendingDeletions');
-            await collection.insertOne({
-                ...deletionInfo,
-                createdAt: new Date(),
-                status: 'pending'
-            });
-            console.log('✅ Added pending deletion:', deletionInfo);
+            await this._ensureConnection();
+            const pendingDeletion = new PendingDeletion(deletionData);
+            await pendingDeletion.save();
+            console.log(`✅ Pending deletion added for chat ${deletionData.chatId}`);
+            return pendingDeletion;
         } catch (error) {
             console.error('❌ Error adding pending deletion:', error);
             throw error;
         }
     }
 
-    async getPendingDeletions() {
+    /**
+     * Get pending deletions that are due
+     * @param {Date} beforeTime - Get deletions before this time
+     * @returns {Promise<Array>} Array of pending deletion objects
+     * @throws {Error} If query fails
+     */
+    async getPendingDeletions(beforeTime) {
         try {
-            const collection = this.db.collection('pendingDeletions');
-            const now = new Date();
-            return await collection.find({
-                status: 'pending',
-                deleteAt: { $lte: now }
-            }).toArray();
+            await this._ensureConnection();
+            return await PendingDeletion.find({
+                deletionTime: { $lte: beforeTime }
+            });
         } catch (error) {
             console.error('❌ Error getting pending deletions:', error);
             throw error;
         }
     }
 
-    async markDeletionAsComplete(messageIds) {
+    /**
+     * Remove a pending deletion record
+     * @param {string} deletionId - The deletion record ID
+     * @returns {Promise<void>}
+     * @throws {Error} If deletion fails
+     */
+    async removePendingDeletion(deletionId) {
         try {
-            const collection = this.db.collection('pendingDeletions');
-            await collection.updateMany(
-                { messageIds: { $in: messageIds } },
-                { $set: { status: 'completed' } }
-            );
+            await this._ensureConnection();
+            await PendingDeletion.findByIdAndDelete(deletionId);
+            console.log(`✅ Pending deletion removed: ${deletionId}`);
         } catch (error) {
-            console.error('❌ Error marking deletion as complete:', error);
+            console.error('❌ Error removing pending deletion:', error);
             throw error;
         }
     }
