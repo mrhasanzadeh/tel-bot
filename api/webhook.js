@@ -194,7 +194,7 @@ module.exports = async (req, res) => {
             rawBody: req.rawBody
         });
 
-        // Handle GET requests (health check)
+        // Handle GET requests (health check and cleanup)
         if (req.method === 'GET') {
             // Try to initialize webhook if not already initialized
             if (!webhookInitialized) {
@@ -202,6 +202,28 @@ module.exports = async (req, res) => {
                 const success = await initializeWebhook();
                 webhookInitialized = success;
                 console.log('✅ Webhook initialization completed:', success);
+            }
+
+            // Check for pending deletions
+            try {
+                const pendingDeletions = await databaseService.getPendingDeletions();
+                console.log(`🔍 Found ${pendingDeletions.length} pending deletions`);
+
+                for (const deletion of pendingDeletions) {
+                    try {
+                        // Delete each message
+                        for (const messageId of deletion.messageIds) {
+                            await bot.telegram.deleteMessage(deletion.chatId, messageId);
+                            console.log(`✅ Deleted message ${messageId} from chat ${deletion.chatId}`);
+                        }
+                        // Mark deletion as complete
+                        await databaseService.markDeletionAsComplete(deletion.messageIds);
+                    } catch (deleteError) {
+                        console.error('❌ Error processing deletion:', deleteError);
+                    }
+                }
+            } catch (cleanupError) {
+                console.error('❌ Error during cleanup:', cleanupError);
             }
 
             return res.status(200).json({

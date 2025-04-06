@@ -105,85 +105,32 @@ class FileHandlerService {
      */
     async sendFileToUser(ctx, fileKey) {
         try {
-            console.log(`🔍 Looking up file with key: ${fileKey}`);
-            const fileData = await databaseService.getFileByKey(fileKey);
-            
-            if (!fileData) {
-                console.log('❌ File not found in database');
-                await ctx.reply('⚠️ فایل مورد نظر یافت نشد!');
-                return false;
+            const file = await databaseService.getFileByKey(fileKey);
+            if (!file) {
+                return ctx.reply('❌ فایل مورد نظر یافت نشد.');
             }
-            
-            if (!fileData.isActive) {
-                console.log('❌ File is no longer active');
-                await ctx.reply('❌ این فایل دیگر در دسترس نیست.');
-                return false;
-            }
-            
-            console.log('📤 Sending file to user...');
-            
-            try {
-                // Forward file without caption
-                const forwardedMessage = await ctx.telegram.copyMessage(
-                    ctx.chat.id,
-                    config.PRIVATE_CHANNEL_ID,
-                    fileData.messageId,
-                    { caption: '' }
-                );
-                console.log('✅ File sent successfully');
-                
-                // Send deletion notice as a new message
-                const noticeMessage = await ctx.reply(
-                    '⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n✅ جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.'
-                );
-                
-                // Update download statistics
-                await databaseService.incrementFileDownloads(fileKey);
-                
-                // Delete messages after 30 seconds
-                setTimeout(async () => {
-                    try {
-                        console.log('🔄 Attempting to delete bot messages...');
-                        console.log(`Chat ID: ${ctx.chat.id}`);
-                        console.log(`Chat Type: ${ctx.chat.type}`);
-                        console.log(`Deleting file message: ${forwardedMessage.message_id}`);
-                        console.log(`Deleting notice message: ${noticeMessage.message_id}`);
 
-                        // Only delete messages in private chats
-                        if (ctx.chat.type === 'private') {
-                            try {
-                                // Delete the notice message first
-                                await ctx.telegram.deleteMessage(ctx.chat.id, noticeMessage.message_id);
-                                console.log('✅ Notice message deleted');
-                                
-                                // Then delete the file message
-                                await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
-                                console.log('✅ File message deleted');
-                            } catch (deleteError) {
-                                console.error('❌ Error deleting bot messages:', deleteError);
-                                if (deleteError.response) {
-                                    console.error('Error details:', deleteError.response);
-                                }
-                            }
-                        } else {
-                            console.log('❌ Message deletion only works in private chats');
-                        }
-                    } catch (error) {
-                        console.error('❌ Error in deletion process:', error);
-                        console.error('Error details:', error.response || error);
-                    }
-                }, 30000);
-                
-                return true;
-            } catch (error) {
-                console.error('❌ Error copying message:', error);
-                await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
-                return false;
-            }
+            // Forward the file without caption
+            const forwardedMsg = await ctx.copyMessage(ctx.chat.id, {
+                from_chat_id: process.env.PRIVATE_CHANNEL_ID,
+                message_id: file.messageId,
+                caption: '' // Remove caption when forwarding
+            });
+
+            // Send warning message as a new message
+            const warningMsg = await ctx.reply('⚠️ این پیام بعد از 30 ثانیه حذف خواهد شد.');
+
+            // Store deletion info in database
+            await databaseService.addPendingDeletion({
+                chatId: ctx.chat.id,
+                messageIds: [forwardedMsg.message_id, warningMsg.message_id],
+                deleteAt: new Date(Date.now() + 30000) // 30 seconds from now
+            });
+
+            return true;
         } catch (error) {
-            console.error('❌ Error in sendFileToUser:', error);
-            await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
-            return false;
+            console.error('Error in sendFileToUser:', error);
+            return ctx.reply('❌ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
         }
     }
 

@@ -254,6 +254,48 @@ class DatabaseService {
             throw error;
         }
     }
+
+    async addPendingDeletion(deletionInfo) {
+        try {
+            const collection = this.db.collection('pendingDeletions');
+            await collection.insertOne({
+                ...deletionInfo,
+                createdAt: new Date(),
+                status: 'pending'
+            });
+            console.log('✅ Added pending deletion:', deletionInfo);
+        } catch (error) {
+            console.error('❌ Error adding pending deletion:', error);
+            throw error;
+        }
+    }
+
+    async getPendingDeletions() {
+        try {
+            const collection = this.db.collection('pendingDeletions');
+            const now = new Date();
+            return await collection.find({
+                status: 'pending',
+                deleteAt: { $lte: now }
+            }).toArray();
+        } catch (error) {
+            console.error('❌ Error getting pending deletions:', error);
+            throw error;
+        }
+    }
+
+    async markDeletionAsComplete(messageIds) {
+        try {
+            const collection = this.db.collection('pendingDeletions');
+            await collection.updateMany(
+                { messageIds: { $in: messageIds } },
+                { $set: { status: 'completed' } }
+            );
+        } catch (error) {
+            console.error('❌ Error marking deletion as complete:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new DatabaseService(); 
