@@ -59,8 +59,7 @@ const handleStart = async (ctx) => {
         } else {
             if (isMember) {
                 await ctx.reply(
-                    `سلام ${username || 'کاربر'} عزیز! 👋\n\n` +
-                    'به ربات دانلود فایل خوش آمدید. برای دریافت فایل مورد نظر، لطفاً لینک آن را ارسال کنید.'
+                   `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال ما: https://t.me/+vpEy9XrQjMw2N2E0`, { disable_web_page_preview: true }
                 );
             } else {
                 const joinButton = {
