@@ -121,24 +121,60 @@ class FileHandlerService {
             // Send warning message
             const warningMessage = await ctx.reply('⚠️ این پیام و فایل بعد از ۳۰ ثانیه حذف خواهند شد.');
 
-            // Schedule deletion after 30 seconds
-            setTimeout(async () => {
-                try {
-                    // Delete both messages
-                    await ctx.telegram.deleteMessage(ctx.from.id, forwardedMessage.message_id)
-                        .catch(err => console.error('Error deleting forwarded message:', err));
-                    
-                    await ctx.telegram.deleteMessage(ctx.from.id, warningMessage.message_id)
-                        .catch(err => console.error('Error deleting warning message:', err));
-                } catch (error) {
-                    console.error('Error in deletion timeout:', error);
-                }
-            }, 30000);
+            // Store message IDs in user's session
+            if (!ctx.session) {
+                ctx.session = {};
+            }
+            
+            if (!ctx.session.pendingDeletions) {
+                ctx.session.pendingDeletions = [];
+            }
+            
+            ctx.session.pendingDeletions.push({
+                chatId: ctx.from.id,
+                messageIds: [forwardedMessage.message_id, warningMessage.message_id],
+                deleteAt: Date.now() + 30000 // 30 seconds from now
+            });
+
+            // Try to delete messages immediately if they're already expired
+            await this.checkAndDeletePendingMessages(ctx);
 
         } catch (error) {
             console.error('Error sending file to user:', error);
             await ctx.reply('❌ متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
         }
+    }
+
+    /**
+     * Check and delete any pending messages that have expired
+     * @param {Object} ctx - Telegram context
+     */
+    async checkAndDeletePendingMessages(ctx) {
+        if (!ctx.session || !ctx.session.pendingDeletions) {
+            return;
+        }
+        
+        const now = Date.now();
+        const remainingDeletions = [];
+        
+        for (const deletion of ctx.session.pendingDeletions) {
+            if (deletion.deleteAt <= now) {
+                // Delete messages
+                for (const messageId of deletion.messageIds) {
+                    try {
+                        await ctx.telegram.deleteMessage(deletion.chatId, messageId);
+                    } catch (error) {
+                        console.error(`Error deleting message ${messageId}:`, error);
+                    }
+                }
+            } else {
+                // Keep this deletion for later
+                remainingDeletions.push(deletion);
+            }
+        }
+        
+        // Update session with remaining deletions
+        ctx.session.pendingDeletions = remainingDeletions;
     }
 
     /**

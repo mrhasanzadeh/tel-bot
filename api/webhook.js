@@ -1,4 +1,4 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, session } = require('telegraf');
 const { setupHandlers } = require('../src/handlers/botHandlers');
 const membershipService = require('../src/services/membershipService');
 const databaseService = require('../src/services/databaseService');
@@ -26,6 +26,9 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
         apiRoot: 'https://api.telegram.org'
     }
 });
+
+// Enable session
+bot.use(session());
 
 // Set up membership service with bot instance
 membershipService.setTelegram(bot);

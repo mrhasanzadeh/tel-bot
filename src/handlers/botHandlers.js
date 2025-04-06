@@ -91,22 +91,29 @@ function setupHandlers(bot) {
     // Check for pending message deletions on every message
     bot.on('message', async (ctx) => {
         try {
-            const pendingDeletions = await databaseService.getPendingDeletions(ctx.from.id);
-            const now = new Date();
-
-            for (const deletion of pendingDeletions) {
-                if (deletion.deleteAt <= now) {
-                    // Delete messages
-                    for (const messageId of deletion.messageIds) {
-                        try {
-                            await ctx.telegram.deleteMessage(ctx.from.id, messageId);
-                        } catch (error) {
-                            console.error(`Error deleting message ${messageId}:`, error);
+            // Check for pending message deletions
+            if (ctx.session && ctx.session.pendingDeletions) {
+                const now = Date.now();
+                const remainingDeletions = [];
+                
+                for (const deletion of ctx.session.pendingDeletions) {
+                    if (deletion.deleteAt <= now) {
+                        // Delete messages
+                        for (const messageId of deletion.messageIds) {
+                            try {
+                                await ctx.telegram.deleteMessage(deletion.chatId, messageId);
+                            } catch (error) {
+                                console.error(`Error deleting message ${messageId}:`, error);
+                            }
                         }
+                    } else {
+                        // Keep this deletion for later
+                        remainingDeletions.push(deletion);
                     }
-                    // Remove from database
-                    await databaseService.removeMessageDeletion(deletion._id);
                 }
+                
+                // Update session with remaining deletions
+                ctx.session.pendingDeletions = remainingDeletions;
             }
         } catch (error) {
             console.error('Error checking message deletions:', error);
