@@ -121,12 +121,19 @@ class FileHandlerService {
             // Send warning message
             const warningMessage = await ctx.reply('⚠️ این پیام و فایل بعد از ۳۰ ثانیه حذف خواهند شد.');
 
-            // Store deletion info in database
-            await databaseService.addMessageDeletion({
-                chatId: ctx.from.id,
-                messageIds: [forwardedMessage.message_id, warningMessage.message_id],
-                deleteAt: new Date(Date.now() + 30000) // 30 seconds from now
-            });
+            // Schedule deletion after 30 seconds
+            setTimeout(async () => {
+                try {
+                    // Delete both messages
+                    await ctx.telegram.deleteMessage(ctx.from.id, forwardedMessage.message_id)
+                        .catch(err => console.error('Error deleting forwarded message:', err));
+                    
+                    await ctx.telegram.deleteMessage(ctx.from.id, warningMessage.message_id)
+                        .catch(err => console.error('Error deleting warning message:', err));
+                } catch (error) {
+                    console.error('Error in deletion timeout:', error);
+                }
+            }, 30000);
 
         } catch (error) {
             console.error('Error sending file to user:', error);

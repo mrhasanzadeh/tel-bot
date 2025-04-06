@@ -16,11 +16,5 @@
       "src": "/(.*)",
       "dest": "/api/webhook.js"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/check-deletions",
-      "schedule": "*/1 * * * *"
-    }
   ]
 }
