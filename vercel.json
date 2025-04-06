@@ -20,7 +20,7 @@
   "crons": [
     {
       "path": "/api/check-deletions",
-      "schedule": "*/30 * * * * *"
+      "schedule": "*/10 * * * * *"
     }
   ]
 }
