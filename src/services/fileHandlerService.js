@@ -128,9 +128,6 @@ class FileHandlerService {
                 deleteAt: new Date(Date.now() + 30000) // 30 seconds from now
             });
 
-            // Schedule immediate deletion check
-            await this.checkAndDeleteMessages(ctx.from.id);
-
         } catch (error) {
             console.error('Error sending file to user:', error);
             await ctx.reply('❌ متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
