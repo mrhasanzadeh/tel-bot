@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tel-bot
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: PRIVATE_CHANNEL_ID
+        sync: false
+      - key: PUBLIC_CHANNEL_ID
+        sync: false
+      - key: PUBLIC_CHANNEL_USERNAME
+        sync: false
