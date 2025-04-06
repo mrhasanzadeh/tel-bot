@@ -238,25 +238,22 @@ class DatabaseService {
     /**
      * Deactivate files by their message ID
      * @param {number} messageId - The Telegram message ID
-     * @returns {Promise<Object>} Updated file objects
+     * @returns {Promise<number>} Number of deactivated files
      * @throws {Error} If update fails
      */
     async deactivateFilesByMessageId(messageId) {
         try {
-            await this._ensureConnection();
             const result = await File.updateMany(
-                { messageId },
-                { isActive: false }
+                { messageId, isActive: true },
+                { isActive: false, lastAccessed: new Date() }
             );
-            console.log(`✅ Deactivated ${result.modifiedCount} files for message ${messageId}`);
-            return result;
+            
+            return result.modifiedCount;
         } catch (error) {
-            console.error(`❌ Error deactivating files for message ${messageId}:`, error);
+            console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
             throw error;
         }
     }
 }
 
-// Create and export a single instance of the service
-const databaseService = new DatabaseService();
-module.exports = databaseService; 
+module.exports = new DatabaseService(); 

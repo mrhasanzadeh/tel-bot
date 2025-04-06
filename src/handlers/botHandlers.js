@@ -1,6 +1,5 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
-const databaseService = require('../services/databaseService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -85,38 +84,6 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('❌ Error handling file request:', error);
             await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
-        }
-    });
-
-    // Check for pending message deletions on every message
-    bot.on('message', async (ctx) => {
-        try {
-            // Check for pending message deletions
-            if (ctx.session && ctx.session.pendingDeletions) {
-                const now = Date.now();
-                const remainingDeletions = [];
-                
-                for (const deletion of ctx.session.pendingDeletions) {
-                    if (deletion.deleteAt <= now) {
-                        // Delete messages
-                        for (const messageId of deletion.messageIds) {
-                            try {
-                                await ctx.telegram.deleteMessage(deletion.chatId, messageId);
-                            } catch (error) {
-                                console.error(`Error deleting message ${messageId}:`, error);
-                            }
-                        }
-                    } else {
-                        // Keep this deletion for later
-                        remainingDeletions.push(deletion);
-                    }
-                }
-                
-                // Update session with remaining deletions
-                ctx.session.pendingDeletions = remainingDeletions;
-            }
-        } catch (error) {
-            console.error('Error checking message deletions:', error);
         }
     });
 }
