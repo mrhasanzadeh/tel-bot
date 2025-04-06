@@ -2,7 +2,6 @@ const { Telegraf } = require('telegraf');
 const { setupHandlers } = require('../src/handlers/botHandlers');
 const membershipService = require('../src/services/membershipService');
 const databaseService = require('../src/services/databaseService');
-const deletionService = require('../src/services/deletionService');
 const config = require('../config');
 const https = require('https');
 
