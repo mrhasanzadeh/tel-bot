@@ -121,23 +121,31 @@ class FileHandlerService {
             // Send warning message
             const warningMessage = await ctx.reply('⚠️ این پیام و فایل بعد از ۳۰ ثانیه حذف خواهند شد.');
 
-            // Store message IDs in user's session
-            if (!ctx.session) {
-                ctx.session = {};
-            }
-            
-            if (!ctx.session.pendingDeletions) {
-                ctx.session.pendingDeletions = [];
-            }
-            
-            ctx.session.pendingDeletions.push({
-                chatId: ctx.from.id,
-                messageIds: [forwardedMessage.message_id, warningMessage.message_id],
-                deleteAt: Date.now() + 30000 // 30 seconds from now
-            });
+            // Send a reminder message after 25 seconds
+            setTimeout(async () => {
+                try {
+                    await ctx.reply('⏱️ 5 ثانیه دیگر پیام‌ها حذف می‌شوند...');
+                } catch (error) {
+                    console.error('Error sending reminder message:', error);
+                }
+            }, 25000);
 
-            // Try to delete messages immediately if they're already expired
-            await this.checkAndDeletePendingMessages(ctx);
+            // Send a final message after 30 seconds
+            setTimeout(async () => {
+                try {
+                    // Delete both messages
+                    await ctx.telegram.deleteMessage(ctx.from.id, forwardedMessage.message_id)
+                        .catch(err => console.error('Error deleting forwarded message:', err));
+                    
+                    await ctx.telegram.deleteMessage(ctx.from.id, warningMessage.message_id)
+                        .catch(err => console.error('Error deleting warning message:', err));
+                    
+                    // Send a confirmation message
+                    await ctx.reply('✅ پیام‌ها با موفقیت حذف شدند.');
+                } catch (error) {
+                    console.error('Error in deletion timeout:', error);
+                }
+            }, 30000);
 
         } catch (error) {
             console.error('Error sending file to user:', error);
