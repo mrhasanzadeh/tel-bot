@@ -1,7 +1,65 @@
-const bot = require('./server');
+const { Telegraf } = require('telegraf');
+const { setupHandlers } = require('../src/handlers/botHandlers');
+const membershipService = require('../src/services/membershipService');
 const databaseService = require('../src/services/databaseService');
 const config = require('../config');
 const https = require('https');
+
+// Validate required environment variables
+const requiredEnvVars = [
+    'BOT_TOKEN',
+    'MONGODB_URI',
+    'PRIVATE_CHANNEL_ID',
+    'PUBLIC_CHANNEL_ID',
+    'PUBLIC_CHANNEL_USERNAME'
+];
+
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+if (missingEnvVars.length > 0) {
+    console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+}
+
+// Initialize bot with token
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Set up membership service with bot instance
+membershipService.setTelegram(bot);
+
+// Connect to MongoDB
+databaseService.connect()
+    .then(() => {
+        console.log('✅ Connected to MongoDB');
+    })
+    .catch(error => {
+        console.error('❌ MongoDB connection error:', error);
+        throw error;
+    });
+
+// Set up bot handlers
+setupHandlers(bot);
+
+// Handle errors
+bot.catch((error, ctx) => {
+    console.error('❌ Bot error:', error);
+    console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        description: error.description
+    });
+    
+    if (error.response) {
+        console.error('Telegram API Response:', error.response.data);
+    }
+    
+    if (ctx) {
+        ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.')
+            .catch(replyError => {
+                console.error('❌ Error sending error message:', replyError);
+            });
+    }
+});
 
 // Create HTTPS agent with SSL verification disabled
 const httpsAgent = new https.Agent({
@@ -78,6 +136,7 @@ const initializeWebhook = async () => {
 // Initialize webhook on first request
 let webhookInitialized = false;
 
+// Export the webhook handler
 module.exports = async (req, res) => {
     try {
         // Initialize webhook on first request
@@ -147,23 +206,7 @@ module.exports = async (req, res) => {
         
         res.status(200).json({ ok: true });
     } catch (error) {
-        // Log detailed error information
-        console.error('❌ Error in webhook handler:', {
-            message: error.message,
-            stack: error.stack,
-            update: req.body,
-            error: error,
-            type: error.name,
-            code: error.code
-        });
-        
-        // Send a more detailed error response
-        res.status(500).json({ 
-            ok: false, 
-            error: error.message,
-            type: error.name,
-            code: error.code,
-            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
+        console.error('❌ Webhook error:', error);
+        res.status(500).json({ ok: false, error: error.message });
     }
 }; 
