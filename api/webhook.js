@@ -227,35 +227,40 @@ module.exports = async (req, res) => {
 
         // Validate request method
         if (req.method !== 'POST') {
+            console.warn('⚠️ Invalid request method:', req.method);
             return res.status(405).json({ ok: false, error: 'Method not allowed' });
         }
 
-        // Ensure database connection
+        // Validate request body
+        if (!update) {
+            console.warn('⚠️ No request body received');
+            return res.status(400).json({ ok: false, error: 'No request body' });
+        }
+
+        // Log the update type
+        const updateType = Object.keys(update).find(key => key !== 'update_id');
+        console.log('📝 Processing update type:', updateType, 'Update:', JSON.stringify(update, null, 2));
+
+        // Ensure database connection before processing update
         await ensureDatabaseConnection();
 
-        // Process the update
-        console.log('🔄 Processing update:', update);
+        // Handle Telegram webhook
+        console.log('🔄 Processing Telegram update...');
         await bot.handleUpdate(update);
-
-        // Send immediate response
+        console.log('✅ Successfully processed update');
+        
         res.status(200).json({ ok: true });
     } catch (error) {
-        console.error('❌ Webhook error:', {
+        console.error('❌ Webhook error:', error);
+        console.error('Error details:', {
             message: error.message,
             stack: error.stack,
             code: error.code,
             description: error.description
         });
-        
         if (error.response) {
             console.error('Telegram API Response:', error.response.data);
         }
-        
-        // Send error response
-        res.status(500).json({ 
-            ok: false, 
-            error: 'Internal server error',
-            details: error.message
-        });
+        res.status(500).json({ ok: false, error: error.message });
     }
 }; 
