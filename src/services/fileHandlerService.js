@@ -98,92 +98,82 @@ class FileHandlerService {
     }
 
     /**
-     * Send a file to user based on file key
+     * Handle a file request
      * @param {Object} ctx - Telegram context
      * @param {string} fileKey - The file key
+     * @returns {Promise<void>}
+     */
+    async handleFileRequest(ctx, fileKey = null) {
+        try {
+            console.log('📥 Handling file request:', { fileKey, ctx: ctx.message });
+            
+            // If no fileKey provided, try to extract from message text
+            if (!fileKey && ctx.message && ctx.message.text) {
+                fileKey = ctx.message.text.trim();
+            }
+            
+            if (!fileKey) {
+                console.log('❌ No file key provided');
+                await ctx.reply('لطفاً کلید فایل را وارد کنید.');
+                return;
+            }
+            
+            // Find file in database
+            const file = await databaseService.findFileByKey(fileKey);
+            if (!file) {
+                console.log('❌ File not found:', fileKey);
+                await ctx.reply('فایل مورد نظر یافت نشد.');
+                return;
+            }
+            
+            // Send file to user
+            console.log('✅ Sending file to user:', file);
+            await this.sendFileToUser(ctx, file);
+        } catch (error) {
+            console.error('❌ Error handling file request:', error);
+            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        }
+    }
+
+    /**
+     * Send a file to user based on file key
+     * @param {Object} ctx - Telegram context
+     * @param {Object} file - The file data
      * @returns {Promise<boolean>} Whether file was sent successfully
      */
-    async sendFileToUser(ctx, fileKey) {
+    async sendFileToUser(ctx, file) {
         try {
-            console.log(`🔍 Looking up file with key: ${fileKey}`);
-            const fileData = await databaseService.getFileByKey(fileKey);
+            console.log('📤 Sending file to user:', file);
             
-            if (!fileData) {
-                console.log('❌ File not found in database');
-                await ctx.reply('⚠️ فایل مورد نظر یافت نشد!');
-                return false;
-            }
+            // Forward the file without caption
+            const forwardedMessage = await ctx.telegram.copyMessage(
+                ctx.chat.id,
+                process.env.PRIVATE_CHANNEL_ID,
+                file.messageId,
+                { caption: '' }
+            );
             
-            if (!fileData.isActive) {
-                console.log('❌ File is no longer active');
-                await ctx.reply('❌ این فایل دیگر در دسترس نیست.');
-                return false;
-            }
+            // Send warning message
+            const warningMessage = await ctx.reply(
+                '⚠️ این پیام و فایل بعد از 30 ثانیه حذف خواهند شد.'
+            );
             
-            console.log('📤 Sending file to user...');
+            // Delete both messages after 30 seconds
+            setTimeout(async () => {
+                try {
+                    await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
+                    await ctx.telegram.deleteMessage(ctx.chat.id, warningMessage.message_id);
+                    console.log('✅ Messages deleted successfully');
+                } catch (deleteError) {
+                    console.error('❌ Error deleting messages:', deleteError);
+                }
+            }, 30000);
             
-            try {
-                // Forward file without caption
-                const forwardedMessage = await ctx.telegram.copyMessage(
-                    ctx.chat.id,
-                    config.PRIVATE_CHANNEL_ID,
-                    fileData.messageId,
-                    { caption: '' }
-                );
-                console.log('✅ File sent successfully');
-                
-                // Send deletion notice as a new message
-                const noticeMessage = await ctx.reply(
-                    '⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n✅ جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.'
-                );
-                
-                // Update download statistics
-                await databaseService.incrementFileDownloads(fileKey);
-                
-                // Delete messages after 30 seconds
-                setTimeout(async () => {
-                    try {
-                        console.log('🔄 Attempting to delete bot messages...');
-                        console.log(`Chat ID: ${ctx.chat.id}`);
-                        console.log(`Chat Type: ${ctx.chat.type}`);
-                        console.log(`Deleting file message: ${forwardedMessage.message_id}`);
-                        console.log(`Deleting notice message: ${noticeMessage.message_id}`);
-
-                        // Only delete messages in private chats
-                        if (ctx.chat.type === 'private') {
-                            try {
-                                // Delete the notice message first
-                                await ctx.telegram.deleteMessage(ctx.chat.id, noticeMessage.message_id);
-                                console.log('✅ Notice message deleted');
-                                
-                                // Then delete the file message
-                                await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
-                                console.log('✅ File message deleted');
-                            } catch (deleteError) {
-                                console.error('❌ Error deleting bot messages:', deleteError);
-                                if (deleteError.response) {
-                                    console.error('Error details:', deleteError.response);
-                                }
-                            }
-                        } else {
-                            console.log('❌ Message deletion only works in private chats');
-                        }
-                    } catch (error) {
-                        console.error('❌ Error in deletion process:', error);
-                        console.error('Error details:', error.response || error);
-                    }
-                }, 30000);
-                
-                return true;
-            } catch (error) {
-                console.error('❌ Error copying message:', error);
-                await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
-                return false;
-            }
+            console.log('✅ File sent successfully');
+            return true;
         } catch (error) {
-            console.error('❌ Error in sendFileToUser:', error);
-            await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
-            return false;
+            console.error('❌ Error sending file:', error);
+            throw error;
         }
     }
 
