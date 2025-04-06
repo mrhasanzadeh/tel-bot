@@ -39,7 +39,7 @@ function setupHandlers(bot) {
     bot.command('start', async (ctx) => {
         try {
             console.log('👋 Handling /start command');
-            const isMember = await membershipService.checkMembership(ctx.from.id);
+            const isMember = await membershipService.isMember(ctx.from.id);
             
             if (!isMember) {
                 console.log('❌ User is not a member, sending join message');
@@ -66,7 +66,7 @@ function setupHandlers(bot) {
     bot.on('text', async (ctx) => {
         try {
             console.log('📝 Handling text message:', ctx.message.text);
-            const isMember = await membershipService.checkMembership(ctx.from.id);
+            const isMember = await membershipService.isMember(ctx.from.id);
             
             if (!isMember) {
                 console.log('❌ User is not a member, storing request');
@@ -95,7 +95,7 @@ function setupHandlers(bot) {
     bot.on('callback_query', async (ctx) => {
         try {
             console.log('🔄 Handling callback query:', ctx.callbackQuery);
-            const isMember = await membershipService.checkMembership(ctx.from.id);
+            const isMember = await membershipService.isMember(ctx.from.id);
             
             if (isMember) {
                 console.log('✅ User joined, processing pending request');
