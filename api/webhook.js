@@ -20,8 +20,12 @@ if (missingEnvVars.length > 0) {
     throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
 }
 
-// Initialize bot with token
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// Initialize bot with token from config
+const bot = new Telegraf(process.env.BOT_TOKEN, {
+    telegram: {
+        apiRoot: 'https://api.telegram.org'
+    }
+});
 
 // Set up membership service with bot instance
 membershipService.setTelegram(bot);
@@ -93,6 +97,12 @@ const ensureDatabaseConnection = async () => {
 // Initialize webhook
 const initializeWebhook = async () => {
     try {
+        // Log token presence (not the actual token)
+        console.log('🔑 Bot token status:', {
+            exists: !!process.env.BOT_TOKEN,
+            length: process.env.BOT_TOKEN ? process.env.BOT_TOKEN.length : 0
+        });
+
         // Ensure we have a valid VERCEL_URL
         if (!process.env.VERCEL_URL) {
             throw new Error('VERCEL_URL environment variable is not set');
@@ -101,35 +111,70 @@ const initializeWebhook = async () => {
         const webhookUrl = `https://${process.env.VERCEL_URL}/api/webhook`;
         console.log('🌐 Setting up webhook URL:', webhookUrl);
         
-        // First, delete any existing webhook
+        // First, try to get current webhook info
+        console.log('ℹ️ Getting current webhook info...');
+        try {
+            const currentWebhook = await bot.telegram.getWebhookInfo();
+            console.log('Current webhook info:', currentWebhook);
+        } catch (infoError) {
+            console.error('⚠️ Error getting webhook info:', {
+                message: infoError.message,
+                description: infoError.description,
+                code: infoError.code
+            });
+        }
+        
+        // Delete existing webhook
         console.log('🗑️ Deleting existing webhook...');
-        await bot.telegram.deleteWebhook();
+        try {
+            await bot.telegram.deleteWebhook();
+            console.log('✅ Successfully deleted existing webhook');
+        } catch (deleteError) {
+            console.error('⚠️ Error deleting webhook:', {
+                message: deleteError.message,
+                description: deleteError.description,
+                code: deleteError.code
+            });
+        }
         
-        // Then set up the new webhook
+        // Set up the new webhook
         console.log('🔄 Setting up new webhook...');
-        const result = await bot.telegram.setWebhook(webhookUrl, {
-            agent: httpsAgent
-        });
-        
-        console.log('✅ Webhook setup result:', result);
+        try {
+            const result = await bot.telegram.setWebhook(webhookUrl, {
+                agent: httpsAgent,
+                max_connections: 40
+            });
+            console.log('✅ Webhook setup result:', result);
+        } catch (setError) {
+            console.error('❌ Error setting webhook:', {
+                message: setError.message,
+                description: setError.description,
+                code: setError.code,
+                response: setError.response?.data
+            });
+            throw setError;
+        }
         
         // Verify webhook info
+        console.log('🔍 Verifying webhook setup...');
         const webhookInfo = await bot.telegram.getWebhookInfo();
-        console.log('ℹ️ Webhook info:', webhookInfo);
+        console.log('ℹ️ Final webhook info:', webhookInfo);
         
         if (!webhookInfo.url || webhookInfo.url !== webhookUrl) {
             throw new Error('Webhook URL verification failed');
         }
         
         console.log('✅ Webhook setup completed successfully');
+        return true;
     } catch (error) {
-        console.error('❌ Failed to setup webhook:', error);
-        console.error('Error details:', {
+        console.error('❌ Failed to setup webhook:', {
             message: error.message,
             stack: error.stack,
-            code: error.code
+            code: error.code,
+            description: error.description,
+            response: error.response?.data
         });
-        throw error;
+        return false;
     }
 };
 
@@ -139,14 +184,6 @@ let webhookInitialized = false;
 // Export the webhook handler
 module.exports = async (req, res) => {
     try {
-        // Initialize webhook on first request
-        if (!webhookInitialized) {
-            console.log('🔄 Initializing webhook for the first time...');
-            await initializeWebhook();
-            webhookInitialized = true;
-            console.log('✅ Webhook initialization completed');
-        }
-
         // Log request details for all requests
         console.log('📥 Received request:', {
             method: req.method,
@@ -159,11 +196,19 @@ module.exports = async (req, res) => {
 
         // Handle GET requests (health check)
         if (req.method === 'GET') {
+            // Try to initialize webhook if not already initialized
+            if (!webhookInitialized) {
+                console.log('🔄 Initializing webhook for the first time...');
+                const success = await initializeWebhook();
+                webhookInitialized = success;
+                console.log('✅ Webhook initialization completed:', success);
+            }
+
             return res.status(200).json({
                 ok: true,
                 status: 'healthy',
                 timestamp: new Date().toISOString(),
-                webhook: 'active',
+                webhook: webhookInitialized ? 'active' : 'inactive',
                 path: req.url,
                 webhookInitialized
             });
@@ -207,6 +252,15 @@ module.exports = async (req, res) => {
         res.status(200).json({ ok: true });
     } catch (error) {
         console.error('❌ Webhook error:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            description: error.description
+        });
+        if (error.response) {
+            console.error('Telegram API Response:', error.response.data);
+        }
         res.status(500).json({ ok: false, error: error.message });
     }
 }; 
