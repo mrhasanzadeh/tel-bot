@@ -5,6 +5,7 @@ const membershipService = require('../src/services/membershipService');
 const databaseService = require('../src/services/databaseService');
 const config = require('../config');
 const https = require('https');
+const fetch = require('node-fetch');
 
 // Create Express app
 const app = express();
@@ -226,6 +227,31 @@ app.get('/', (req, res) => {
     });
 });
 
+// Keep-alive mechanism
+const keepAlive = () => {
+    const url = process.env.RENDER_EXTERNAL_URL 
+        ? process.env.RENDER_EXTERNAL_URL
+        : `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
+    
+    console.log('🔄 Setting up keep-alive mechanism...');
+    
+    // Function to ping the server
+    const pingServer = async () => {
+        try {
+            const response = await fetch(url);
+            console.log('✅ Keep-alive ping successful:', response.status);
+        } catch (error) {
+            console.error('❌ Keep-alive ping failed:', error.message);
+        }
+    };
+    
+    // Ping every 10 minutes
+    setInterval(pingServer, 10 * 60 * 1000);
+    
+    // Initial ping
+    pingServer();
+};
+
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -233,4 +259,7 @@ app.listen(PORT, () => {
     console.log('🌐 Webhook URL:', process.env.RENDER_EXTERNAL_URL 
         ? `${process.env.RENDER_EXTERNAL_URL}/webhook`
         : `https://${process.env.RENDER_SERVICE_NAME}.onrender.com/webhook`);
+    
+    // Start keep-alive mechanism
+    keepAlive();
 }); 
