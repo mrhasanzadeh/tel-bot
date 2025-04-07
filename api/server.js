@@ -223,7 +223,25 @@ app.get('/', (req, res) => {
     res.json({
         ok: true,
         status: 'healthy',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        message: 'Telegram Bot is running',
+        endpoints: {
+            webhook: '/webhook',
+            health: '/webhook'
+        }
+    });
+});
+
+// Handle 404 errors
+app.use((req, res) => {
+    res.status(404).json({
+        ok: false,
+        error: 'Not Found',
+        message: 'The requested endpoint does not exist',
+        availableEndpoints: {
+            webhook: '/webhook',
+            health: '/webhook'
+        }
     });
 });
 
