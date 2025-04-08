@@ -7,7 +7,8 @@
     "local": "nodemon index.js",
     "start": "node api/server.js",
     "dev": "nodemon api/server.js",
-    "deploy": "vercel deploy --prod"
+    "deploy": "vercel deploy --prod",
+    "pm2": "pm2 start index.js"
   },
   "keywords": [
     "telegram",
