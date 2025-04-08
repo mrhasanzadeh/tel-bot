@@ -784,6 +784,9 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+app.get('/health', async (req, res) => {
+    res.status(200).json({ ok: true, status: 'healthy' });
+}); 
 // Health check endpoint
 app.get('/webhook', async (req, res) => {
     try {
