@@ -81,10 +81,8 @@ function generateFileKey() {
 // ایجاد دکمه‌های شیشه‌ای
 const getSubscriptionKeyboard = (userId) => {
     return Markup.inlineKeyboard([
-        [
-            Markup.button.url('📢 عضویت در کانال اول', `https://t.me/${config.PUBLIC_CHANNEL_USERNAME}`),
-            Markup.button.url('📢 عضویت در کانال دوم', `https://t.me/${config.ADDITIONAL_CHANNEL_USERNAME}`)
-        ],
+        [Markup.button.url('📢 عضویت در کانال اول', `https://t.me/${config.PUBLIC_CHANNEL_USERNAME}`)],
+        [Markup.button.url('📢 عضویت در کانال دوم', `https://t.me/${config.ADDITIONAL_CHANNEL_USERNAME}`)],
         [Markup.button.callback('✅ بررسی عضویت', `check_membership_${userId}`)]
     ]);
 };
