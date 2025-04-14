@@ -41,7 +41,8 @@ const requiredEnvVars = [
     'MONGODB_URI',
     'PRIVATE_CHANNEL_ID',
     'PUBLIC_CHANNEL_ID',
-    'PUBLIC_CHANNEL_USERNAME'
+    'PUBLIC_CHANNEL_USERNAME',
+    'ADDITIONAL_CHANNEL_USERNAME'
 ];
 
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -80,7 +81,10 @@ function generateFileKey() {
 // ایجاد دکمه‌های شیشه‌ای
 const getSubscriptionKeyboard = (userId) => {
     return Markup.inlineKeyboard([
-        [Markup.button.url('📢 عضویت در کانال', `https://t.me/${config.PUBLIC_CHANNEL_USERNAME}`)],
+        [
+            Markup.button.url('📢 عضویت در کانال اول', `https://t.me/${config.PUBLIC_CHANNEL_USERNAME}`),
+            Markup.button.url('📢 عضویت در کانال دوم', `https://t.me/${config.ADDITIONAL_CHANNEL_USERNAME}`)
+        ],
         [Markup.button.callback('✅ بررسی عضویت', `check_membership_${userId}`)]
     ]);
 };
@@ -104,9 +108,9 @@ async function sendNotMemberMessage(ctx) {
     try {
         if (ctx.callbackQuery) {
             await ctx.answerCbQuery('⚠️ هنوز توی بعضی از کانال‌ها عضو نشدی! لطفاً توی همه عضو شو، بعد دکمه رو بزن.', { show_alert: true, cache_time: 0 });
-            await ctx.editMessageText('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
+            await ctx.editMessageText('📢 برای عضویت در کانال‌ها، روی دکمه‌های زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
         } else {
-            await ctx.reply('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
+            await ctx.reply('📢 برای عضویت در کانال‌ها، روی دکمه‌های زیر کلیک کنید:', getSubscriptionKeyboard(ctx.from.id));
         }
     } catch (error) {
         console.error('Error sending not member message:', error);
@@ -413,7 +417,7 @@ bot.action(/^check_membership_(\d+)$/, async (ctx) => {
         } else {
             await ctx.answerCbQuery('⚠️ هنوز توی بعضی از کانال‌ها عضو نشدی! لطفاً توی همه عضو شو، بعد دکمه رو بزن.', { show_alert: true, cache_time: 0 });
             try {
-                await ctx.editMessageText('📢 برای عضویت در کانال، روی دکمه زیر کلیک کنید:', {
+                await ctx.editMessageText('📢 برای عضویت در کانال‌ها، روی دکمه‌های زیر کلیک کنید:', {
                     ...getSubscriptionKeyboard(ctx.from.id),
                     chat_id: ctx.chat.id,
                     message_id: ctx.callbackQuery.message.message_id
