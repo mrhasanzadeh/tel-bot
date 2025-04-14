@@ -89,15 +89,23 @@ const getSubscriptionKeyboard = (userId) => {
     ]);
 };
 
-// بررسی عضویت کاربر در کانال عمومی
+// بررسی عضویت کاربر در کانال‌ها
 async function checkUserMembership(ctx) {
     try {
-        const member = await ctx.telegram.getChatMember(config.PUBLIC_CHANNEL_ID, ctx.from.id);
-        return ['member', 'administrator', 'creator'].includes(member.status);
+        // بررسی عضویت در کانال اول
+        const member1 = await ctx.telegram.getChatMember(config.PUBLIC_CHANNEL_ID, ctx.from.id);
+        const isMember1 = ['member', 'administrator', 'creator'].includes(member1.status);
+
+        // بررسی عضویت در کانال دوم
+        const member2 = await ctx.telegram.getChatMember(config.ADDITIONAL_CHANNEL_ID, ctx.from.id);
+        const isMember2 = ['member', 'administrator', 'creator'].includes(member2.status);
+
+        // کاربر باید در هر دو کانال عضو باشد
+        return isMember1 && isMember2;
     } catch (error) {
         console.error('Error checking membership:', error);
         if (ctx.callbackQuery) {
-            await ctx.answerCbQuery('⚠️ خطا در بررسی عضویت', { show_alert: true, cache_time: 0 });
+            await ctx.answerCbQuery('⚠️ خطا در بررسی عضویت. لطفاً مطمئن شوید که در هر دو کانال عضو هستید.', { show_alert: true, cache_time: 0 });
         }
         return false;
     }
