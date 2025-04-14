@@ -33,42 +33,73 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
     }
 });
 
+// Clean up existing webhooks before starting
+const cleanupWebhooks = async () => {
+    try {
+        console.log('🧹 Cleaning up existing webhooks...');
+        const webhookInfo = await bot.telegram.getWebhookInfo();
+        console.log('Current webhook info:', webhookInfo);
+        
+        if (webhookInfo.url) {
+            console.log('🗑️ Deleting existing webhook...');
+            await bot.telegram.deleteWebhook();
+            console.log('✅ Successfully deleted existing webhook');
+        }
+    } catch (error) {
+        console.error('❌ Error cleaning up webhooks:', error);
+    }
+};
+
 // Set up membership service with bot instance
 membershipService.setTelegram(bot);
 
-// Connect to MongoDB
-databaseService.connect()
-    .then(() => {
+// Connect to MongoDB and initialize bot
+const initializeBot = async () => {
+    try {
+        // Clean up existing webhooks first
+        await cleanupWebhooks();
+        
+        // Connect to MongoDB
+        await databaseService.connect();
         console.log('✅ Connected to MongoDB');
-    })
-    .catch(error => {
-        console.error('❌ MongoDB connection error:', error);
-        throw error;
-    });
-
-// Set up bot handlers
-setupHandlers(bot);
-
-// Handle errors
-bot.catch((error, ctx) => {
-    console.error('❌ Bot error:', error);
-    console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-        description: error.description
-    });
-    
-    if (error.response) {
-        console.error('Telegram API Response:', error.response.data);
-    }
-    
-    if (ctx) {
-        ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.')
-            .catch(replyError => {
-                console.error('❌ Error sending error message:', replyError);
+        
+        // Set up bot handlers
+        setupHandlers(bot);
+        
+        // Handle errors
+        bot.catch((error, ctx) => {
+            console.error('❌ Bot error:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                code: error.code,
+                description: error.description
             });
+            
+            if (error.response) {
+                console.error('Telegram API Response:', error.response.data);
+            }
+            
+            if (ctx) {
+                ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.')
+                    .catch(replyError => {
+                        console.error('❌ Error sending error message:', replyError);
+                    });
+            }
+        });
+        
+        console.log('✅ Bot initialized successfully');
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to initialize bot:', error);
+        return false;
     }
+};
+
+// Initialize bot on startup
+initializeBot().catch(error => {
+    console.error('❌ Fatal error during initialization:', error);
+    process.exit(1);
 });
 
 // Create HTTPS agent with SSL verification disabled
