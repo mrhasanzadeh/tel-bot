@@ -92,20 +92,40 @@ const getSubscriptionKeyboard = (userId) => {
 // بررسی عضویت کاربر در کانال‌ها
 async function checkUserMembership(ctx) {
     try {
+        console.log('🔍 Checking membership for user:', ctx.from.id);
+        
         // بررسی عضویت در کانال اول
+        console.log('📢 Checking first channel:', config.PUBLIC_CHANNEL_ID);
         const member1 = await ctx.telegram.getChatMember(config.PUBLIC_CHANNEL_ID, ctx.from.id);
         const isMember1 = ['member', 'administrator', 'creator'].includes(member1.status);
+        console.log('First channel status:', member1.status, 'isMember:', isMember1);
 
         // بررسی عضویت در کانال دوم
+        console.log('📢 Checking second channel:', config.ADDITIONAL_CHANNEL_ID);
         const member2 = await ctx.telegram.getChatMember(config.ADDITIONAL_CHANNEL_ID, ctx.from.id);
         const isMember2 = ['member', 'administrator', 'creator'].includes(member2.status);
+        console.log('Second channel status:', member2.status, 'isMember:', isMember2);
 
         // کاربر باید در هر دو کانال عضو باشد
-        return isMember1 && isMember2;
+        const isMember = isMember1 && isMember2;
+        console.log('Final membership status:', isMember);
+        
+        return isMember;
     } catch (error) {
-        console.error('Error checking membership:', error);
+        console.error('❌ Error checking membership:', {
+            error: error.message,
+            code: error.code,
+            description: error.description,
+            userId: ctx.from.id,
+            channel1: config.PUBLIC_CHANNEL_ID,
+            channel2: config.ADDITIONAL_CHANNEL_ID
+        });
+        
         if (ctx.callbackQuery) {
-            await ctx.answerCbQuery('⚠️ خطا در بررسی عضویت. لطفاً مطمئن شوید که در هر دو کانال عضو هستید.', { show_alert: true, cache_time: 0 });
+            await ctx.answerCbQuery(
+                '⚠️ خطا در بررسی عضویت. لطفاً مطمئن شوید که در هر دو کانال عضو هستید.',
+                { show_alert: true, cache_time: 0 }
+            );
         }
         return false;
     }
