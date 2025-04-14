@@ -92,24 +92,10 @@ const getSubscriptionKeyboard = (userId) => {
 // بررسی عضویت کاربر در کانال‌ها
 async function checkUserMembership(ctx) {
     try {
-        console.log('🔍 Checking membership for user:', ctx.from.id);
         const { isAllMember } = await membershipService.isMember(ctx.from.id);
-        console.log('Membership check result:', isAllMember);
         return isAllMember;
     } catch (error) {
-        console.error('❌ Error checking membership:', {
-            error: error.message,
-            code: error.code,
-            description: error.description,
-            userId: ctx.from.id
-        });
-        
-        if (ctx.callbackQuery) {
-            await ctx.answerCbQuery(
-                '⚠️ خطا در بررسی عضویت. لطفاً مطمئن شوید که در هر دو کانال عضو هستید.',
-                { show_alert: true, cache_time: 0 }
-            );
-        }
+        console.error('❌ Error checking membership:', error);
         return false;
     }
 }
@@ -347,8 +333,9 @@ bot.command('start', async (ctx) => {
 bot.action(/^check_membership_(\d+)$/, async (ctx) => {
     try {
         const userId = ctx.match[1];
-        const isMember = await checkUserMembership(ctx);
-        if (isMember) {
+        const { isAllMember, memberships } = await membershipService.isMember(userId);
+        
+        if (isAllMember) {
             // حذف پیام قبلی
             await ctx.deleteMessage();
             
@@ -388,33 +375,12 @@ bot.action(/^check_membership_(\d+)$/, async (ctx) => {
                     // حذف فایل بعد از ۳۰ ثانیه
                     setTimeout(async () => {
                         try {
-                            // حذف پیام فایل
-                            try {
-                                await ctx.deleteMessage(sentMessage.message_id);
-                                console.log(`Deleted file message ${sentMessage.message_id} after 30 seconds`);
-                            } catch (fileError) {
-                                if (fileError.description && fileError.description.includes('message to delete not found')) {
-                                    console.log(`File message ${sentMessage.message_id} already deleted`);
-                                } else {
-                                    console.error(`Error deleting file message ${sentMessage.message_id}:`, fileError);
-                                }
-                            }
-                            
-                            // حذف پیام هشدار
-                            try {
-                                await ctx.deleteMessage(warningMessage.message_id);
-                                console.log(`Deleted warning message ${warningMessage.message_id} after 30 seconds`);
-                            } catch (warnError) {
-                                if (warnError.description && warnError.description.includes('message to delete not found')) {
-                                    console.log(`Warning message ${warningMessage.message_id} already deleted`);
-                                } else {
-                                    console.error(`Error deleting warning message ${warningMessage.message_id}:`, warnError);
-                                }
-                            }
+                            await ctx.deleteMessage(sentMessage.message_id);
+                            await ctx.deleteMessage(warningMessage.message_id);
                         } catch (error) {
-                            console.error('General error in message deletion timeout:', error);
+                            console.error('Error deleting messages:', error);
                         }
-                    }, 30000); // 30000 میلی‌ثانیه = 30 ثانیه
+                    }, 30000);
                     
                     // به‌روزرسانی آمار دانلود
                     await databaseService.incrementFileDownloads(pendingLink);
@@ -423,21 +389,19 @@ bot.action(/^check_membership_(\d+)$/, async (ctx) => {
                 }
             } else {
                 // اگر لینکی در انتظار نبود، پیام عادی نمایش داده شود
-                await ctx.reply('✅ عضویت شما در کانال تأیید شد.\n\nبرای دریافت فایل، روی لینک مستقیم فایل مورد نظر کلیک کنید.');
+                await ctx.reply('✅ عضویت شما در کانال‌ها تأیید شد.\n\nبرای دریافت فایل، روی لینک مستقیم فایل مورد نظر کلیک کنید.');
             }
         } else {
-            await ctx.answerCbQuery('⚠️ هنوز توی بعضی از کانال‌ها عضو نشدی! لطفاً توی همه عضو شو، بعد دکمه رو بزن.', { show_alert: true, cache_time: 0 });
-            try {
-                await ctx.editMessageText('📢 برای عضویت در کانال‌ها، روی دکمه‌های زیر کلیک کنید:', {
-                    ...getSubscriptionKeyboard(ctx.from.id),
-                    chat_id: ctx.chat.id,
-                    message_id: ctx.callbackQuery.message.message_id
-                });
-            } catch (error) {
-                if (!error.message.includes('message is not modified')) {
-                    console.error('Error editing message:', error);
-                }
+            // ساخت پیام وضعیت عضویت
+            let statusMessage = '📢 وضعیت عضویت شما:\n\n';
+            for (const [channelUsername, status] of Object.entries(memberships)) {
+                const emoji = status.isMember ? '✅' : '❌';
+                statusMessage += `${emoji} ${status.name}\n`;
             }
+            statusMessage += '\nبرای دریافت فایل، لطفاً در همه کانال‌ها عضو شوید.';
+
+            await ctx.answerCbQuery('⚠️ هنوز در همه کانال‌ها عضو نیستید!', { show_alert: true, cache_time: 0 });
+            await ctx.editMessageText(statusMessage, getSubscriptionKeyboard(ctx.from.id));
         }
     } catch (error) {
         console.error('Error handling check_membership action:', error);
