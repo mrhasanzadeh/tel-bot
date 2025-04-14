@@ -44,10 +44,80 @@ function setupHandlers(bot) {
     });
 
     // Handle /start command
-    bot.command('start', handleStartCommand);
+    bot.command('start', async (ctx) => {
+        try {
+            console.log('🚀 Handling start command');
+            const userId = ctx.from.id;
+            const startPayload = ctx.message.text.split(' ')[1];
+
+            // Check if user is a member of all channels
+            const { isAllMember, memberships } = await membershipService.isMember(userId);
+            console.log(`👤 User ${userId} membership status: ${isAllMember}`);
+
+            if (startPayload && startPayload.startsWith('get_')) {
+                const fileKey = startPayload.replace('get_', '');
+                console.log(`📥 Processing file request for key: ${fileKey}`);
+                
+                if (isAllMember) {
+                    await fileHandlerService.sendFileToUser(ctx, fileKey);
+                } else {
+                    // Store the file request for later
+                    pendingLinks.set(userId, fileKey);
+                    console.log(`📝 Stored pending file request for user ${userId}`);
+                    
+                    await ctx.reply(
+                        createMembershipMessage(memberships),
+                        { reply_markup: createJoinButtons(userId) }
+                    );
+                }
+            } else {
+                if (isAllMember) {
+                    await ctx.reply(
+                        `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
+                        { disable_web_page_preview: true }
+                    );
+                } else {
+                    await ctx.reply(
+                        createMembershipMessage(memberships),
+                        { reply_markup: createJoinButtons(userId) }
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error handling start command:', error);
+            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        }
+    });
 
     // Handle membership check callback
-    bot.action(/check_membership_(.+)/, handleMembershipCheck);
+    bot.action(/check_membership_(.+)/, async (ctx) => {
+        try {
+            const userId = ctx.from.id;
+            const { isAllMember, memberships } = await membershipService.isMember(userId);
+
+            if (isAllMember) {
+                await ctx.editMessageText(
+                    `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
+                    { disable_web_page_preview: true }
+                );
+
+                // Process any pending file request
+                const pendingLink = pendingLinks.get(userId);
+                if (pendingLink) {
+                    pendingLinks.delete(userId);
+                    await fileHandlerService.sendFileToUser(ctx, pendingLink);
+                }
+            } else {
+                await ctx.editMessageText(
+                    createMembershipMessage(memberships),
+                    { reply_markup: createJoinButtons(userId) }
+                );
+            }
+        } catch (error) {
+            console.error('❌ Error handling membership check:', error);
+            await ctx.editMessageText('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        }
+    });
 
     // Handle direct file requests
     bot.on('text', async (ctx) => {
@@ -57,27 +127,19 @@ function setupHandlers(bot) {
                 const fileKey = text.replace('get_', '');
                 console.log(`🔍 Processing file request for key: ${fileKey}`);
                 
-                // Check if user is a member
-                const isMember = await membershipService.isMember(ctx.from.id);
+                // Check if user is a member of all channels
+                const { isAllMember, memberships } = await membershipService.isMember(ctx.from.id);
                 
-                if (isMember) {
+                if (isAllMember) {
                     await fileHandlerService.sendFileToUser(ctx, fileKey);
                 } else {
                     // Store the file request for later
                     pendingLinks.set(ctx.from.id, fileKey);
                     console.log(`📝 Stored pending file request for user ${ctx.from.id}`);
                     
-                    // Show join button
-                    const joinButton = {
-                        inline_keyboard: [[
-                            { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
-                            { text: '✅ بررسی عضویت', callback_data: `check_membership_${ctx.from.id}` }
-                        ]]
-                    };
-
                     await ctx.reply(
-                        'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
-                        { reply_markup: joinButton }
+                        createMembershipMessage(memberships),
+                        { reply_markup: createJoinButtons(ctx.from.id) }
                     );
                 }
             }
@@ -89,109 +151,38 @@ function setupHandlers(bot) {
 }
 
 /**
- * Handle /start command
- * @param {Object} ctx - Telegram context
- * @returns {Promise<void>}
+ * Create join buttons for all required channels
+ * @returns {Object} Telegram inline keyboard markup
  */
-async function handleStartCommand(ctx) {
-    try {
-        console.log('🚀 Handling start command');
-        const userId = ctx.from.id;
-        const username = ctx.from.username;
-        const startPayload = ctx.message.text.split(' ')[1];
-
-        // Check if user is a member
-        const isMember = await membershipService.isMember(userId);
-        console.log(`👤 User ${userId} membership status: ${isMember}`);
-
-        if (startPayload && startPayload.startsWith('get_')) {
-            const fileKey = startPayload.replace('get_', '');
-            console.log(`📥 Processing file request for key: ${fileKey}`);
-            
-            if (isMember) {
-                await fileHandlerService.sendFileToUser(ctx, fileKey);
-            } else {
-                // Store the file request for later
-                pendingLinks.set(userId, fileKey);
-                console.log(`📝 Stored pending file request for user ${userId}`);
-                
-                // Show join button
-                const joinButton = {
-                    inline_keyboard: [[
-                        { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
-                        { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
-                    ]]
-                };
-
-                await ctx.reply(
-                    'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
-                    { reply_markup: joinButton }
-                );
-            }
-        } else {
-            if (isMember) {
-                await ctx.reply(
-                    `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال ما: https://t.me/+vpEy9XrQjMw2N2E0`, { disable_web_page_preview: true }
-                );
-            } else {
-                const joinButton = {
-                    inline_keyboard: [[
-                        { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
-                        { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
-                    ]]
-                };
-
-                await ctx.reply(
-                    'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
-                    { reply_markup: joinButton }
-                );
-            }
-        }
-    } catch (error) {
-        console.error('❌ Error handling start command:', error);
-        await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
-    }
+function createJoinButtons(userId) {
+    return {
+        inline_keyboard: [
+            [
+                { text: '👥 عضویت در کانال اول', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
+                { text: '👥 عضویت در کانال دوم', url: `https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}` }
+            ],
+            [
+                { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
+            ]
+        ]
+    };
 }
 
 /**
- * Handle membership check callback
- * @param {Object} ctx - Telegram context
- * @returns {Promise<void>}
+ * Create membership status message
+ * @param {Object} memberships - Membership status for each channel
+ * @returns {string} Status message
  */
-async function handleMembershipCheck(ctx) {
-    try {
-        const userId = ctx.from.id;
-        const username = ctx.from.username;
-        const isMember = await membershipService.isMember(userId);
-
-        if (isMember) {
-            await ctx.editMessageText(
-                    `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال ما: https://t.me/+vpEy9XrQjMw2N2E0`, { disable_web_page_preview: true }
-            );
-
-            // Process any pending file request
-            const pendingLink = pendingLinks.get(userId);
-            if (pendingLink) {
-                pendingLinks.delete(userId);
-                await fileHandlerService.sendFileToUser(ctx, pendingLink);
-            }
-        } else {
-            const joinButton = {
-                inline_keyboard: [[
-                    { text: '👥 عضویت در کانال', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
-                    { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
-                ]]
-            };
-
-            await ctx.editMessageText(
-                'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
-                { reply_markup: joinButton }
-            );
-        }
-    } catch (error) {
-        console.error('❌ Error handling membership check:', error);
-        await ctx.editMessageText('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+function createMembershipMessage(memberships) {
+    let message = '📢 وضعیت عضویت شما:\n\n';
+    
+    for (const [username, status] of Object.entries(memberships)) {
+        const emoji = status.isMember ? '✅' : '❌';
+        message += `${emoji} ${status.name}\n`;
     }
+    
+    message += '\nبرای دریافت فایل، لطفاً در همه کانال‌ها عضو شوید.';
+    return message;
 }
 
 module.exports = {
