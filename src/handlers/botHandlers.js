@@ -91,58 +91,44 @@ function setupHandlers(bot) {
 
     // Handle membership check callback
     bot.action(/check_membership_(.+)/, async (ctx) => {
-        try {
-            const userId = ctx.from.id;
-            const { isAllMember, memberships } = await membershipService.isMember(userId);
+        const userId = ctx.match[1];
+        const memberships = await membershipService.isMember(userId);
+        const allMemberships = Object.values(memberships);
+        const isMember = allMemberships.every(m => m.isMember);
 
-            if (isAllMember) {
-                await ctx.editMessageText(
-                    `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
-                    { disable_web_page_preview: true }
-                );
-
-                // Process any pending file request
-                const pendingLink = pendingLinks.get(userId);
-                if (pendingLink) {
-                    pendingLinks.delete(userId);
-                    await fileHandlerService.sendFileToUser(ctx, pendingLink);
-                }
-            } else {
-                await ctx.editMessageText(
-                    createMembershipMessage(memberships),
-                    { reply_markup: createJoinButtons(userId) }
-                );
+        if (isMember) {
+            await ctx.editMessageText('✅ شما در همه کانال‌ها عضو هستید. حالا می‌توانید فایل‌ها را دریافت کنید.');
+            const pendingLink = pendingLinks.get(userId);
+            if (pendingLink) {
+                await fileHandlerService.sendFileToUser(userId, pendingLink);
+                pendingLinks.delete(userId);
             }
-        } catch (error) {
-            console.error('❌ Error handling membership check:', error);
-            await ctx.editMessageText('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+        } else {
+            const message = createMembershipMessage(memberships);
+            await ctx.editMessageText(message, createJoinButtons(userId));
         }
     });
 
-    // Handle direct file requests
+    // Handle file requests
     bot.on('text', async (ctx) => {
         try {
-            const text = ctx.message.text;
-            if (text.startsWith('get_')) {
-                const fileKey = text.replace('get_', '');
-                console.log(`🔍 Processing file request for key: ${fileKey}`);
+            const userId = ctx.from.id;
+            const memberships = await membershipService.isMember(userId);
+            const allMemberships = Object.values(memberships);
+            const isMember = allMemberships.every(m => m.isMember);
+
+            if (!isMember) {
+                // Store the link for later use
+                pendingLinks.set(userId, ctx.message.text);
                 
-                // Check if user is a member of all channels
-                const { isAllMember, memberships } = await membershipService.isMember(ctx.from.id);
-                
-                if (isAllMember) {
-                    await fileHandlerService.sendFileToUser(ctx, fileKey);
-                } else {
-                    // Store the file request for later
-                    pendingLinks.set(ctx.from.id, fileKey);
-                    console.log(`📝 Stored pending file request for user ${ctx.from.id}`);
-                    
-                    await ctx.reply(
-                        createMembershipMessage(memberships),
-                        { reply_markup: createJoinButtons(ctx.from.id) }
-                    );
-                }
+                // Send membership status and join buttons
+                const message = createMembershipMessage(memberships);
+                await ctx.reply(message, createJoinButtons(userId));
+                return;
             }
+
+            // User is a member, send the file
+            await fileHandlerService.sendFileToUser(userId, ctx.message.text);
         } catch (error) {
             console.error('❌ Error handling file request:', error);
             await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
