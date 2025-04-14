@@ -93,6 +93,14 @@ const initializeWebhook = async () => {
         try {
             const currentWebhook = await bot.telegram.getWebhookInfo();
             console.log('Current webhook info:', currentWebhook);
+            
+            // If there's an existing webhook with a different URL, delete it
+            if (currentWebhook.url && currentWebhook.url !== webhookUrl) {
+                console.log('🗑️ Deleting existing webhook with different URL...');
+                await bot.telegram.deleteWebhook();
+                // Wait a bit to ensure the webhook is fully deleted
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         } catch (infoError) {
             console.error('⚠️ Error getting webhook info:', {
                 message: infoError.message,
@@ -101,11 +109,13 @@ const initializeWebhook = async () => {
             });
         }
         
-        // Delete existing webhook
+        // Delete existing webhook again to be sure
         console.log('🗑️ Deleting existing webhook...');
         try {
             await bot.telegram.deleteWebhook();
             console.log('✅ Successfully deleted existing webhook');
+            // Wait a bit to ensure the webhook is fully deleted
+            await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (deleteError) {
             console.error('⚠️ Error deleting webhook:', {
                 message: deleteError.message,
@@ -122,6 +132,17 @@ const initializeWebhook = async () => {
                 max_connections: 40
             });
             console.log('✅ Webhook setup result:', result);
+            
+            // Verify webhook info immediately after setting
+            const webhookInfo = await bot.telegram.getWebhookInfo();
+            console.log('ℹ️ Final webhook info:', webhookInfo);
+            
+            if (!webhookInfo.url || webhookInfo.url !== webhookUrl) {
+                throw new Error('Webhook URL verification failed');
+            }
+            
+            console.log('✅ Webhook setup completed successfully');
+            return true;
         } catch (setError) {
             console.error('❌ Error setting webhook:', {
                 message: setError.message,
@@ -131,18 +152,6 @@ const initializeWebhook = async () => {
             });
             throw setError;
         }
-        
-        // Verify webhook info
-        console.log('🔍 Verifying webhook setup...');
-        const webhookInfo = await bot.telegram.getWebhookInfo();
-        console.log('ℹ️ Final webhook info:', webhookInfo);
-        
-        if (!webhookInfo.url || webhookInfo.url !== webhookUrl) {
-            throw new Error('Webhook URL verification failed');
-        }
-        
-        console.log('✅ Webhook setup completed successfully');
-        return true;
     } catch (error) {
         console.error('❌ Failed to setup webhook:', {
             message: error.message,
