@@ -33,35 +33,57 @@ class MembershipService {
         try {
             if (!this.telegram) {
                 console.error('❌ Telegram bot instance not set in membership service');
-                return false;
+                return { isAllMember: false, memberships: {} };
             }
 
-            if (!process.env.PUBLIC_CHANNEL_ID) {
-                console.error('❌ PUBLIC_CHANNEL_ID environment variable is not set');
-                return false;
+            if (!process.env.PUBLIC_CHANNEL_ID || !process.env.ADDITIONAL_CHANNEL_ID) {
+                console.error('❌ Channel IDs environment variables are not set');
+                return { isAllMember: false, memberships: {} };
             }
 
             console.log(`🔍 Checking membership for user ${userId}`);
-            console.log(`📢 Checking membership in channel ${process.env.PUBLIC_CHANNEL_ID}`);
             
-            // Get the chat member status
-            const chatMember = await this.telegram.telegram.getChatMember(
+            // Check first channel
+            console.log(`📢 Checking membership in first channel ${process.env.PUBLIC_CHANNEL_ID}`);
+            const chatMember1 = await this.telegram.telegram.getChatMember(
                 process.env.PUBLIC_CHANNEL_ID,
                 userId
             );
-            
-            // Check if the user is a member, administrator, or creator
-            const isMember = ['member', 'administrator', 'creator'].includes(chatMember.status);
-            
-            console.log(`👤 User ${userId} membership status: ${chatMember.status} (isMember: ${isMember})`);
-            
-            return isMember;
+            const isMember1 = ['member', 'administrator', 'creator'].includes(chatMember1.status);
+            console.log(`👤 User ${userId} first channel status: ${chatMember1.status} (isMember: ${isMember1})`);
+
+            // Check second channel
+            console.log(`📢 Checking membership in second channel ${process.env.ADDITIONAL_CHANNEL_ID}`);
+            const chatMember2 = await this.telegram.telegram.getChatMember(
+                process.env.ADDITIONAL_CHANNEL_ID,
+                userId
+            );
+            const isMember2 = ['member', 'administrator', 'creator'].includes(chatMember2.status);
+            console.log(`👤 User ${userId} second channel status: ${chatMember2.status} (isMember: ${isMember2})`);
+
+            // User must be a member of both channels
+            const isAllMember = isMember1 && isMember2;
+            console.log(`👤 User ${userId} final membership status: ${isAllMember}`);
+
+            return {
+                isAllMember,
+                memberships: {
+                    [process.env.PUBLIC_CHANNEL_USERNAME]: {
+                        name: 'کانال اول',
+                        isMember: isMember1
+                    },
+                    [process.env.ADDITIONAL_CHANNEL_USERNAME]: {
+                        name: 'کانال دوم',
+                        isMember: isMember2
+                    }
+                }
+            };
         } catch (error) {
             console.error('❌ Error checking membership:', error);
             if (error.response) {
                 console.error('Telegram API Response:', error.response.data);
             }
-            return false;
+            return { isAllMember: false, memberships: {} };
         }
     }
 }

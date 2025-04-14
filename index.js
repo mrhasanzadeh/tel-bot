@@ -93,32 +93,15 @@ const getSubscriptionKeyboard = (userId) => {
 async function checkUserMembership(ctx) {
     try {
         console.log('🔍 Checking membership for user:', ctx.from.id);
-        
-        // بررسی عضویت در کانال اول
-        console.log('📢 Checking first channel:', config.PUBLIC_CHANNEL_ID);
-        const member1 = await ctx.telegram.getChatMember(config.PUBLIC_CHANNEL_ID, ctx.from.id);
-        const isMember1 = ['member', 'administrator', 'creator'].includes(member1.status);
-        console.log('First channel status:', member1.status, 'isMember:', isMember1);
-
-        // بررسی عضویت در کانال دوم
-        console.log('📢 Checking second channel:', config.ADDITIONAL_CHANNEL_ID);
-        const member2 = await ctx.telegram.getChatMember(config.ADDITIONAL_CHANNEL_ID, ctx.from.id);
-        const isMember2 = ['member', 'administrator', 'creator'].includes(member2.status);
-        console.log('Second channel status:', member2.status, 'isMember:', isMember2);
-
-        // کاربر باید در هر دو کانال عضو باشد
-        const isMember = isMember1 && isMember2;
-        console.log('Final membership status:', isMember);
-        
-        return isMember;
+        const { isAllMember } = await membershipService.isMember(ctx.from.id);
+        console.log('Membership check result:', isAllMember);
+        return isAllMember;
     } catch (error) {
         console.error('❌ Error checking membership:', {
             error: error.message,
             code: error.code,
             description: error.description,
-            userId: ctx.from.id,
-            channel1: config.PUBLIC_CHANNEL_ID,
-            channel2: config.ADDITIONAL_CHANNEL_ID
+            userId: ctx.from.id
         });
         
         if (ctx.callbackQuery) {
