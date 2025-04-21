@@ -1,6 +1,5 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
-const databaseService = require('../services/databaseService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -133,69 +132,6 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('❌ Error handling file request:', error);
             await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
-        }
-    });
-
-    // Handle /stats command
-    bot.command('stats', async (ctx) => {
-        try {
-            console.log('📊 Stats command received from user:', ctx.from.id);
-            console.log('Admin ID from env:', process.env.ADMIN_USER_ID);
-            
-            // Check if user is admin
-            if (ctx.from.id.toString() !== process.env.ADMIN_USER_ID) {
-                console.log('❌ User is not admin');
-                await ctx.reply('❌ شما دسترسی به این دستور را ندارید.');
-                return;
-            }
-
-            console.log('✅ User is admin, fetching files...');
-            const files = await databaseService.getAllFiles(100); // Get last 100 files
-            console.log('📁 Number of files found:', files?.length || 0);
-
-            if (!files || files.length === 0) {
-                console.log('⚠️ No files found');
-                await ctx.reply('📊 هیچ فایلی برای نمایش آمار وجود ندارد.');
-                return;
-            }
-
-            // Sort files by download count
-            files.sort((a, b) => b.downloads - a.downloads);
-
-            // Create statistics message
-            let statsMessage = '📊 آمار دانلود فایل‌ها:\n\n';
-            
-            files.forEach((file, index) => {
-                statsMessage += `${index + 1}. ${file.fileName || 'بدون نام'}\n`;
-                statsMessage += `   🔑 کد: ${file.key}\n`;
-                statsMessage += `   📥 تعداد دانلود: ${file.downloads}\n`;
-                statsMessage += `   📅 تاریخ: ${new Date(file.date).toLocaleString('fa-IR')}\n`;
-                statsMessage += `   🔗 لینک: https://t.me/${ctx.botInfo.username}?start=get_${file.key}\n\n`;
-            });
-
-            console.log('📝 Stats message length:', statsMessage.length);
-
-            // Split message if it's too long
-            const maxLength = 4000;
-            if (statsMessage.length > maxLength) {
-                console.log('📨 Splitting long message into parts');
-                const parts = [];
-                while (statsMessage.length > 0) {
-                    parts.push(statsMessage.substring(0, maxLength));
-                    statsMessage = statsMessage.substring(maxLength);
-                }
-                
-                for (const part of parts) {
-                    await ctx.reply(part);
-                }
-            } else {
-                await ctx.reply(statsMessage);
-            }
-            
-            console.log('✅ Stats command completed successfully');
-        } catch (error) {
-            console.error('❌ Error in stats command:', error);
-            await ctx.reply('❌ خطایی در دریافت آمار رخ داد.');
         }
     });
 }
