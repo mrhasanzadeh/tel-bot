@@ -629,106 +629,87 @@ bot.catch((err, ctx) => {
 });
 
 // Start the bot
-bot.launch()
-    .then(() => {
-        console.log('✅ Bot started successfully');
-        console.log(`🤖 Bot username: @${bot.botInfo.username}`);
-    })
-    .catch(err => {
-        console.error('❌ Failed to start bot:', err);
-        process.exit(1);
+if (process.env.NODE_ENV === 'production') {
+    // In production, use webhook
+    console.log('🚀 Starting bot in webhook mode');
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, async () => {
+        console.log(`🌐 Server is running on port ${PORT}`);
+        try {
+            // Initialize webhook
+            const success = await initializeWebhook();
+            if (success) {
+                console.log('✅ Webhook initialized successfully');
+            } else {
+                console.error('❌ Failed to initialize webhook');
+            }
+        } catch (error) {
+            console.error('❌ Error initializing webhook:', error);
+        }
     });
+} else {
+    // In development, use polling
+    console.log('🚀 Starting bot in polling mode');
+    bot.launch()
+        .then(() => {
+            console.log('✅ Bot started successfully');
+            console.log(`🤖 Bot username: @${bot.botInfo.username}`);
+        })
+        .catch(err => {
+            console.error('❌ Failed to start bot:', err);
+            process.exit(1);
+        });
+}
 
 // Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-// Create HTTPS agent with SSL verification disabled
-const httpsAgent = new https.Agent({
-    rejectUnauthorized: false,
-    keepAlive: true,
-    timeout: 60000
+process.once('SIGINT', () => {
+    console.log('🛑 Stopping bot...');
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    console.log('🛑 Stopping bot...');
+    bot.stop('SIGTERM');
 });
 
-// Initialize webhook
-const initializeWebhook = async () => {
+// Initialize webhook function
+async function initializeWebhook() {
     try {
-        // Get the webhook URL from Render
-        const webhookUrl = process.env.RENDER_EXTERNAL_URL 
-            ? `${process.env.RENDER_EXTERNAL_URL}/webhook`
-            : `https://${process.env.RENDER_SERVICE_NAME}.onrender.com/webhook`;
-            
-        console.log('🌐 Setting up webhook URL:', webhookUrl);
-        
-        // First, try to get current webhook info
-        console.log('ℹ️ Getting current webhook info...');
-        try {
-            const currentWebhook = await bot.telegram.getWebhookInfo();
-            console.log('Current webhook info:', currentWebhook);
-        } catch (infoError) {
-            console.error('⚠️ Error getting webhook info:', {
-                message: infoError.message,
-                description: infoError.description,
-                code: infoError.code
-            });
+        // Get the webhook URL
+        const webhookUrl = process.env.WEBHOOK_URL;
+        if (!webhookUrl) {
+            throw new Error('WEBHOOK_URL environment variable is not set');
         }
-        
+        console.log('🌐 Setting webhook URL:', webhookUrl);
+
         // Delete existing webhook
         console.log('🗑️ Deleting existing webhook...');
-        try {
-            await bot.telegram.deleteWebhook();
-            console.log('✅ Successfully deleted existing webhook');
-        } catch (deleteError) {
-            console.error('⚠️ Error deleting webhook:', {
-                message: deleteError.message,
-                description: deleteError.description,
-                code: deleteError.code
-            });
-        }
-        
-        // Set up the new webhook
-        console.log('🔄 Setting up new webhook...');
-        try {
-            const result = await bot.telegram.setWebhook(webhookUrl, {
-                agent: httpsAgent,
-                max_connections: 40
-            });
-            console.log('✅ Webhook setup result:', result);
-        } catch (setError) {
-            console.error('❌ Error setting webhook:', {
-                message: setError.message,
-                description: setError.description,
-                code: setError.code,
-                response: setError.response?.data
-            });
-            throw setError;
-        }
-        
-        // Verify webhook info
-        console.log('🔍 Verifying webhook setup...');
+        await bot.telegram.deleteWebhook();
+
+        // Set new webhook
+        console.log('📡 Setting new webhook...');
+        await bot.telegram.setWebhook(webhookUrl, {
+            drop_pending_updates: true,
+            allowed_updates: ['message', 'callback_query', 'channel_post', 'chat_member']
+        });
+
+        // Verify webhook
         const webhookInfo = await bot.telegram.getWebhookInfo();
-        console.log('ℹ️ Final webhook info:', webhookInfo);
-        
-        if (!webhookInfo.url || webhookInfo.url !== webhookUrl) {
+        console.log('ℹ️ Webhook info:', webhookInfo);
+
+        if (webhookInfo.url !== webhookUrl) {
             throw new Error('Webhook URL verification failed');
         }
-        
-        console.log('✅ Webhook setup completed successfully');
+
         return true;
     } catch (error) {
-        console.error('❌ Failed to setup webhook:', {
+        console.error('❌ Webhook initialization error:', {
             message: error.message,
-            stack: error.stack,
             code: error.code,
-            description: error.description,
-            response: error.response?.data
+            description: error.description
         });
         return false;
     }
-};
-
-// Initialize webhook on first request
-let webhookInitialized = false;
+}
 
 // Webhook endpoint
 app.post('/webhook', async (req, res) => {
@@ -761,43 +742,13 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+// Health check endpoint
 app.get('/health', async (req, res) => {
     res.status(200).json({ ok: true, status: 'healthy' });
-}); 
-// Health check endpoint
-app.get('/webhook', async (req, res) => {
-    try {
-        // Try to initialize webhook if not already initialized
-        if (!webhookInitialized) {
-            console.log('🔄 Initializing webhook for the first time...');
-            const success = await initializeWebhook();
-            webhookInitialized = success;
-            console.log('✅ Webhook initialization completed:', success);
-        }
-
-        return res.status(200).json({
-            ok: true,
-            status: 'healthy',
-            timestamp: new Date().toISOString(),
-            webhook: webhookInitialized ? 'active' : 'inactive',
-            path: req.url,
-            webhookInitialized
-        });
-    } catch (error) {
-        console.error('❌ Health check error:', error);
-        res.status(500).json({
-            ok: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
 });
 
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
-    console.log('🌐 Webhook URL:', process.env.RENDER_EXTERNAL_URL 
-        ? `${process.env.RENDER_EXTERNAL_URL}/webhook`
-        : `https://${process.env.RENDER_SERVICE_NAME}.onrender.com/webhook`);
 });
