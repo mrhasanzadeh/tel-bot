@@ -10,14 +10,12 @@
  */
 
 const { Telegraf, Markup } = require('telegraf');
-const https = require('https');
 const config = require('./config');
 const databaseService = require('./src/services/databaseService');
 const fileHandlerService = require('./src/services/fileHandlerService');
 const { setupHandlers } = require('./src/handlers/botHandlers');
 const { markMessageDeleted } = require('./src/utils/fileUtils');
 const membershipService = require('./src/services/membershipService');
-const express = require('express');
 
 // ذخیره‌سازی لینک‌های ارسال شده توسط کاربران غیرعضو
 const pendingLinks = new Map();
@@ -31,10 +29,6 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Create Express app
-const app = express();
-app.use(express.json());
-
 // Validate required environment variables
 const requiredEnvVars = [
     'BOT_TOKEN',
@@ -42,6 +36,7 @@ const requiredEnvVars = [
     'PRIVATE_CHANNEL_ID',
     'PUBLIC_CHANNEL_ID',
     'PUBLIC_CHANNEL_USERNAME',
+    'ADDITIONAL_CHANNEL_ID',
     'ADDITIONAL_CHANNEL_USERNAME'
 ];
 
@@ -242,7 +237,7 @@ bot.command('start', async (ctx) => {
                 
                 // Show join button
                 await ctx.reply(
-                    'برای دریافت فایل، لطفاً ابتدا در کانال ما عضو شوید.',
+                    'برای دریافت فایل، لطفاً ابتدا در کانال‌ها عضو شوید.',
                     getSubscriptionKeyboard(ctx.from.id)
                 );
                 return;
@@ -285,33 +280,12 @@ bot.command('start', async (ctx) => {
                 // حذف فایل از چت پس از ۳۰ ثانیه
                 setTimeout(async () => {
                     try {
-                        // حذف پیام فایل
-                        try {
-                            await ctx.deleteMessage(sentMessage.message_id);
-                            console.log(`Deleted file message ${sentMessage.message_id} after 30 seconds`);
-                        } catch (fileError) {
-                            if (fileError.description && fileError.description.includes('message to delete not found')) {
-                                console.log(`File message ${sentMessage.message_id} already deleted`);
-                            } else {
-                                console.error(`Error deleting file message ${sentMessage.message_id}:`, fileError);
-                            }
-                        }
-                        
-                        // حذف پیام هشدار
-                        try {
-                            await ctx.deleteMessage(warningMessage.message_id);
-                            console.log(`Deleted warning message ${warningMessage.message_id} after 30 seconds`);
-                        } catch (warnError) {
-                            if (warnError.description && warnError.description.includes('message to delete not found')) {
-                                console.log(`Warning message ${warningMessage.message_id} already deleted`);
-                            } else {
-                                console.error(`Error deleting warning message ${warningMessage.message_id}:`, warnError);
-                            }
-                        }
+                        await ctx.deleteMessage(sentMessage.message_id);
+                        await ctx.deleteMessage(warningMessage.message_id);
                     } catch (error) {
-                        console.error('General error in message deletion timeout:', error);
+                        console.error('Error deleting messages:', error);
                     }
-                }, 30000); // 30000 میلی‌ثانیه = 30 ثانیه
+                }, 30000);
                 
                 console.log(`File sent to user ${ctx.from.id}`);
             } else {
@@ -319,7 +293,7 @@ bot.command('start', async (ctx) => {
             }
         } else {
             // پیام خوش‌آمدگویی به کاربر جدید
-            await ctx.reply(`🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال ما: https://t.me/+vpEy9XrQjMw2N2E0`, { disable_web_page_preview: true });
+            await ctx.reply(`🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال‌های ما:\n• https://t.me/${config.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${config.ADDITIONAL_CHANNEL_USERNAME}`, { disable_web_page_preview: true });
         }
     } catch (error) {
         console.error('Error in start command handler:', error);
@@ -629,126 +603,16 @@ bot.catch((err, ctx) => {
 });
 
 // Start the bot
-if (process.env.NODE_ENV === 'production') {
-    // In production, use webhook
-    console.log('🚀 Starting bot in webhook mode');
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, async () => {
-        console.log(`🌐 Server is running on port ${PORT}`);
-        try {
-            // Initialize webhook
-            const success = await initializeWebhook();
-            if (success) {
-                console.log('✅ Webhook initialized successfully');
-            } else {
-                console.error('❌ Failed to initialize webhook');
-            }
-        } catch (error) {
-            console.error('❌ Error initializing webhook:', error);
-        }
+bot.launch()
+    .then(() => {
+        console.log('✅ Bot started successfully');
+        console.log(`🤖 Bot username: @${bot.botInfo.username}`);
+    })
+    .catch(err => {
+        console.error('❌ Failed to start bot:', err);
+        process.exit(1);
     });
-} else {
-    // In development, use polling
-    console.log('🚀 Starting bot in polling mode');
-    bot.launch()
-        .then(() => {
-            console.log('✅ Bot started successfully');
-            console.log(`🤖 Bot username: @${bot.botInfo.username}`);
-        })
-        .catch(err => {
-            console.error('❌ Failed to start bot:', err);
-            process.exit(1);
-        });
-}
 
 // Enable graceful stop
-process.once('SIGINT', () => {
-    console.log('🛑 Stopping bot...');
-    bot.stop('SIGINT');
-});
-process.once('SIGTERM', () => {
-    console.log('🛑 Stopping bot...');
-    bot.stop('SIGTERM');
-});
-
-// Initialize webhook function
-async function initializeWebhook() {
-    try {
-        // Get the webhook URL
-        const webhookUrl = process.env.WEBHOOK_URL;
-        if (!webhookUrl) {
-            throw new Error('WEBHOOK_URL environment variable is not set');
-        }
-        console.log('🌐 Setting webhook URL:', webhookUrl);
-
-        // Delete existing webhook
-        console.log('🗑️ Deleting existing webhook...');
-        await bot.telegram.deleteWebhook();
-
-        // Set new webhook
-        console.log('📡 Setting new webhook...');
-        await bot.telegram.setWebhook(webhookUrl, {
-            drop_pending_updates: true,
-            allowed_updates: ['message', 'callback_query', 'channel_post', 'chat_member']
-        });
-
-        // Verify webhook
-        const webhookInfo = await bot.telegram.getWebhookInfo();
-        console.log('ℹ️ Webhook info:', webhookInfo);
-
-        if (webhookInfo.url !== webhookUrl) {
-            throw new Error('Webhook URL verification failed');
-        }
-
-        return true;
-    } catch (error) {
-        console.error('❌ Webhook initialization error:', {
-            message: error.message,
-            code: error.code,
-            description: error.description
-        });
-        return false;
-    }
-}
-
-// Webhook endpoint
-app.post('/webhook', async (req, res) => {
-    try {
-        // Log request details
-        console.log('📥 Received webhook request:', {
-            method: req.method,
-            path: req.url,
-            headers: req.headers,
-            body: req.body
-        });
-
-        // Parse body if it's a string
-        let update = req.body;
-        if (typeof req.body === 'string') {
-            try {
-                update = JSON.parse(req.body);
-            } catch (e) {
-                console.error('❌ Failed to parse request body:', e);
-                return res.status(400).json({ ok: false, error: 'Invalid JSON body' });
-            }
-        }
-
-        // Handle the update
-        await bot.handleUpdate(update);
-        res.json({ ok: true });
-    } catch (error) {
-        console.error('❌ Webhook error:', error);
-        res.status(500).json({ ok: false, error: error.message });
-    }
-});
-
-// Health check endpoint
-app.get('/health', async (req, res) => {
-    res.status(200).json({ ok: true, status: 'healthy' });
-});
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server is running on port ${PORT}`);
-});
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
