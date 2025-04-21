@@ -139,14 +139,22 @@ function setupHandlers(bot) {
     // Handle /stats command
     bot.command('stats', async (ctx) => {
         try {
+            console.log('📊 Stats command received from user:', ctx.from.id);
+            console.log('Admin ID from env:', process.env.ADMIN_USER_ID);
+            
             // Check if user is admin
             if (ctx.from.id.toString() !== process.env.ADMIN_USER_ID) {
+                console.log('❌ User is not admin');
                 await ctx.reply('❌ شما دسترسی به این دستور را ندارید.');
                 return;
             }
 
+            console.log('✅ User is admin, fetching files...');
             const files = await databaseService.getAllFiles(100); // Get last 100 files
+            console.log('📁 Number of files found:', files?.length || 0);
+
             if (!files || files.length === 0) {
+                console.log('⚠️ No files found');
                 await ctx.reply('📊 هیچ فایلی برای نمایش آمار وجود ندارد.');
                 return;
             }
@@ -165,9 +173,12 @@ function setupHandlers(bot) {
                 statsMessage += `   🔗 لینک: https://t.me/${ctx.botInfo.username}?start=get_${file.key}\n\n`;
             });
 
+            console.log('📝 Stats message length:', statsMessage.length);
+
             // Split message if it's too long
             const maxLength = 4000;
             if (statsMessage.length > maxLength) {
+                console.log('📨 Splitting long message into parts');
                 const parts = [];
                 while (statsMessage.length > 0) {
                     parts.push(statsMessage.substring(0, maxLength));
@@ -180,8 +191,10 @@ function setupHandlers(bot) {
             } else {
                 await ctx.reply(statsMessage);
             }
+            
+            console.log('✅ Stats command completed successfully');
         } catch (error) {
-            console.error('❌ Error handling stats command:', error);
+            console.error('❌ Error in stats command:', error);
             await ctx.reply('❌ خطایی در دریافت آمار رخ داد.');
         }
     });
