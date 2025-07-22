@@ -98,6 +98,71 @@ class FileHandlerService {
     }
 
     /**
+     * Handle an edited file in the private channel
+     * @param {Object} ctx - Telegram context
+     * @returns {Promise<void>}
+     */
+    async handleEditedFile(ctx) {
+        try {
+            const message = ctx.editedChannelPost;
+            const messageId = message.message_id;
+            const chatId = ctx.chat.id;
+            if (chatId.toString() !== process.env.PRIVATE_CHANNEL_ID.toString()) return;
+
+            // Only handle if the message contains a file
+            const file = message.document || message.video || message.audio || message.photo;
+            if (!file) {
+                console.log('❌ No file found in edited message');
+                return;
+            }
+
+            // Prepare update data
+            let updateData = {};
+            if (message.document) {
+                updateData = {
+                    fileId: message.document.file_id,
+                    fileName: message.document.file_name,
+                    fileSize: message.document.file_size,
+                    caption: message.caption || ''
+                };
+            } else if (message.video) {
+                updateData = {
+                    fileId: message.video.file_id,
+                    fileName: 'video.mp4',
+                    fileSize: message.video.file_size,
+                    caption: message.caption || ''
+                };
+            } else if (message.audio) {
+                updateData = {
+                    fileId: message.audio.file_id,
+                    fileName: message.audio.file_name || 'audio.mp3',
+                    fileSize: message.audio.file_size,
+                    caption: message.caption || ''
+                };
+            } else if (message.photo) {
+                // For photo, get the largest size
+                const largestPhoto = Array.isArray(message.photo) ? message.photo[message.photo.length - 1] : message.photo;
+                updateData = {
+                    fileId: largestPhoto.file_id,
+                    fileName: 'photo.jpg',
+                    fileSize: largestPhoto.file_size || 0,
+                    caption: message.caption || ''
+                };
+            }
+
+            // Update the file record in the database
+            const updated = await databaseService.updateFileByMessageId(messageId, updateData);
+            if (updated && updated.nModified > 0) {
+                console.log(`✅ File record for message ${messageId} updated in DB.`);
+            } else {
+                console.log(`⚠️ No file record updated for message ${messageId}.`);
+            }
+        } catch (error) {
+            console.error('❌ Error handling edited file:', error);
+        }
+    }
+
+    /**
      * Send a file to user based on file key
      * @param {Object} ctx - Telegram context
      * @param {string} fileKey - The file key

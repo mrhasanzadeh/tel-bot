@@ -43,6 +43,20 @@ function setupHandlers(bot) {
         }
     });
 
+    // Handle edited channel posts
+    bot.on('edited_channel_post', async (ctx) => {
+        try {
+            const chatId = ctx.chat.id;
+            const messageId = ctx.editedChannelPost.message_id;
+            if (chatId && messageId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+                console.log('✏️ Processing edited file in private channel');
+                await fileHandlerService.handleEditedFile(ctx);
+            }
+        } catch (error) {
+            console.error('❌ Error handling edited channel post:', error);
+        }
+    });
+
     // Handle /start command
     bot.command('start', async (ctx) => {
         try {

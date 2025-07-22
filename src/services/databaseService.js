@@ -254,6 +254,22 @@ class DatabaseService {
             throw error;
         }
     }
+
+    /**
+     * Update a file record by messageId
+     * @param {number} messageId - Telegram message ID
+     * @param {Object} updateData - Fields to update
+     * @returns {Promise<Object>} Update result
+     */
+    async updateFileByMessageId(messageId, updateData) {
+        try {
+            await this._ensureConnection();
+            return await File.updateOne({ messageId }, { $set: updateData });
+        } catch (error) {
+            console.error(`❌ Error updating file for message ID ${messageId}:`, error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new DatabaseService(); 
