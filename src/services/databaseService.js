@@ -42,23 +42,15 @@ class DatabaseService {
             const connectionString = config.MONGODB_URI;
             const maskedUri = connectionString.replace(/(mongodb:\/\/)([^:]+):([^@]+)@/, '$1****:****@');
             console.log('📝 Connection string:', maskedUri);
-            
-            await mongoose.connect(config.MONGODB_URI, {
+            await mongoose.connect(process.env.MONGODB_URI, {
                 serverSelectionTimeoutMS: 10000,
-                socketTimeoutMS: 45000,
-                family: 4, // Force IPv4
-                retryWrites: true,
-                w: 'majority',
-                maxPoolSize: 10,
-                minPoolSize: 5,
-                heartbeatFrequencyMS: 10000,
-                retryReads: true
+                family: 4
             });
 
             console.log('✅ Successfully connected to MongoDB');
             this.isConnected = true;
             this.connectionAttempts = 0;
-            
+
             mongoose.connection.on('error', (err) => {
                 console.error('❌ MongoDB connection error:', err);
                 this.isConnected = false;
@@ -77,13 +69,13 @@ class DatabaseService {
         } catch (error) {
             this.connectionAttempts++;
             console.error(`❌ Failed to connect to MongoDB (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts}):`, error);
-            
+
             if (this.connectionAttempts < this.maxConnectionAttempts) {
                 console.log(`🔄 Retrying connection in 5 seconds...`);
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 return this.connect();
             }
-            
+
             throw error;
         }
     }
@@ -153,7 +145,7 @@ class DatabaseService {
                 console.log(`⚠️ File not found for download increment: ${key}`);
                 return null;
             }
-            
+
             file.downloads += 1;
             file.lastAccessed = new Date();
             await file.save();
@@ -247,7 +239,7 @@ class DatabaseService {
                 { messageId, isActive: true },
                 { isActive: false, lastAccessed: new Date() }
             );
-            
+
             return result.modifiedCount;
         } catch (error) {
             console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
