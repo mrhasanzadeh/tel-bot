@@ -2,7 +2,8 @@ require('dotenv').config();
 
 module.exports = {
     BOT_TOKEN: process.env.BOT_TOKEN,
-    MONGODB_URI: process.env.MONGODB_URI,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,
     PUBLIC_CHANNEL_ID: process.env.PUBLIC_CHANNEL_ID,
     PUBLIC_CHANNEL_USERNAME: process.env.PUBLIC_CHANNEL_USERNAME,

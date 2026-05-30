@@ -1,12 +1,11 @@
-const mongoose = require('mongoose');
-const File = require('../models/File');
-const config = require('../../config');
+const supabase = require('./supabaseClient');
 
 /**
  * Service for database operations
  * @class DatabaseService
  */
 class DatabaseService {
+
     /**
      * Create a new database service instance
      */
@@ -16,66 +15,32 @@ class DatabaseService {
         }
         DatabaseService.instance = this;
         this.isConnected = false;
-        this.connectionAttempts = 0;
-        this.maxConnectionAttempts = 3;
+        this.tableName = 'files';
     }
 
     /**
-     * Connect to MongoDB database
+     * Connect to database
      * @returns {Promise<void>}
      * @throws {Error} If connection fails
      */
     async connect() {
         try {
-            if (mongoose.connection.readyState === 1) {
-                console.log('✅ Already connected to MongoDB');
+            if (this.isConnected) {
                 return;
             }
 
-            // Check if MongoDB URI is available
-            if (!config.MONGODB_URI) {
-                throw new Error('MONGODB_URI environment variable is not set');
+            const { error } = await supabase
+                .from(this.tableName)
+                .select('key', { head: true, count: 'exact' })
+                .limit(1);
+
+            if (error) {
+                throw error;
             }
 
-            console.log('🔄 Attempting to connect to MongoDB...');
-            // Safely log the connection string without credentials
-            const connectionString = config.MONGODB_URI;
-            const maskedUri = connectionString.replace(/(mongodb:\/\/)([^:]+):([^@]+)@/, '$1****:****@');
-            console.log('📝 Connection string:', maskedUri);
-            await mongoose.connect(process.env.MONGODB_URI, {
-                serverSelectionTimeoutMS: 10000,
-                family: 4
-            });
-
-            console.log('✅ Successfully connected to MongoDB');
+            console.log('✅ Successfully connected to Supabase');
             this.isConnected = true;
-            this.connectionAttempts = 0;
-
-            mongoose.connection.on('error', (err) => {
-                console.error('❌ MongoDB connection error:', err);
-                this.isConnected = false;
-            });
-
-            mongoose.connection.on('disconnected', () => {
-                console.warn('⚠️ MongoDB disconnected');
-                this.isConnected = false;
-            });
-
-            mongoose.connection.on('reconnected', () => {
-                console.log('✅ MongoDB reconnected');
-                this.isConnected = true;
-            });
-
         } catch (error) {
-            this.connectionAttempts++;
-            console.error(`❌ Failed to connect to MongoDB (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts}):`, error);
-
-            if (this.connectionAttempts < this.maxConnectionAttempts) {
-                console.log(`🔄 Retrying connection in 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                return this.connect();
-            }
-
             throw error;
         }
     }
@@ -87,9 +52,41 @@ class DatabaseService {
      */
     async _ensureConnection() {
         if (!this.isConnected) {
-            console.log('🔄 Reconnecting to MongoDB...');
+            console.log('🔄 Connecting to Supabase...');
             await this.connect();
         }
+    }
+
+    _toDb(fileData) {
+        return {
+            key: fileData.key,
+            message_id: fileData.messageId,
+            type: fileData.type,
+            file_id: fileData.fileId,
+            file_name: fileData.fileName,
+            file_size: fileData.fileSize,
+            caption: fileData.caption,
+            downloads: fileData.downloads,
+            last_accessed: fileData.lastAccessed,
+            is_active: fileData.isActive
+        };
+    }
+
+    _fromDb(row) {
+        if (!row) return null;
+        return {
+            key: row.key,
+            messageId: row.message_id,
+            type: row.type,
+            fileId: row.file_id,
+            fileName: row.file_name,
+            fileSize: row.file_size,
+            caption: row.caption,
+            date: row.created_at ? new Date(row.created_at) : undefined,
+            downloads: row.downloads ?? 0,
+            lastAccessed: row.last_accessed ? new Date(row.last_accessed) : undefined,
+            isActive: row.is_active ?? true
+        };
     }
 
     /**
@@ -101,10 +98,20 @@ class DatabaseService {
     async createFile(fileData) {
         try {
             await this._ensureConnection();
-            const file = new File(fileData);
-            await file.save();
+
+            const insertData = this._toDb(fileData);
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .insert(insertData)
+                .select('*')
+                .single();
+
+            if (error) {
+                throw error;
+            }
+
             console.log(`✅ File saved with key: ${fileData.key}`);
-            return file;
+            return this._fromDb(data);
         } catch (error) {
             console.error('❌ Error saving file:', error);
             throw error;
@@ -120,15 +127,71 @@ class DatabaseService {
     async getFileByKey(key) {
         try {
             await this._ensureConnection();
-            const file = await File.findOne({ key, isActive: true });
-            if (!file) {
+
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .eq('key', key)
+                .eq('is_active', true)
+                .maybeSingle();
+
+            if (error) {
+                throw error;
+            }
+
+            if (!data) {
                 console.log(`⚠️ File not found with key: ${key}`);
             }
-            return file;
+            return this._fromDb(data);
         } catch (error) {
             console.error(`❌ Error getting file with key ${key}:`, error);
             throw error;
         }
+    }
+
+    async getFilePackBySlug(slug) {
+        await this._ensureConnection();
+
+        const cleanSlug = String(slug ?? '').trim().toLowerCase();
+        if (!cleanSlug) return null;
+
+        const { data, error } = await supabase
+            .from('file_packs')
+            .select('id, slug, title, description, is_active, created_at')
+            .eq('slug', cleanSlug)
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!data) return null;
+        return {
+            id: String(data.id),
+            slug: String(data.slug),
+            title: String(data.title ?? ''),
+            description: data.description ?? null,
+            isActive: data.is_active ?? true,
+            createdAt: data.created_at ?? null,
+        };
+    }
+
+    async getFilePackItems(packId) {
+        await this._ensureConnection();
+
+        const cleanId = String(packId ?? '').trim();
+        if (!cleanId) return [];
+
+        const { data, error } = await supabase
+            .from('file_pack_items')
+            .select('pack_id, file_key, sort_order')
+            .eq('pack_id', cleanId)
+            .order('sort_order', { ascending: true });
+
+        if (error) throw error;
+
+        return (data || []).map((row) => ({
+            packId: String(row.pack_id),
+            fileKey: String(row.file_key),
+            sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order ?? 0) || 0,
+        }));
     }
 
     /**
@@ -140,17 +203,39 @@ class DatabaseService {
     async incrementFileDownloads(key) {
         try {
             await this._ensureConnection();
-            const file = await File.findOne({ key, isActive: true });
-            if (!file) {
+
+            const { data: rpcData, error: rpcError } = await supabase
+                .rpc('increment_file_downloads', { p_key: key })
+                .maybeSingle();
+
+            if (!rpcError && rpcData) {
+                return this._fromDb(rpcData);
+            }
+
+            const existing = await this.getFileByKey(key);
+            if (!existing) {
                 console.log(`⚠️ File not found for download increment: ${key}`);
                 return null;
             }
 
-            file.downloads += 1;
-            file.lastAccessed = new Date();
-            await file.save();
-            console.log(`✅ Downloads incremented for file with key ${key} to ${file.downloads}`);
-            return file;
+            const nextDownloads = (existing.downloads || 0) + 1;
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .update({
+                    downloads: nextDownloads,
+                    last_accessed: new Date().toISOString()
+                })
+                .eq('key', key)
+                .eq('is_active', true)
+                .select('*')
+                .single();
+
+            if (error) {
+                throw error;
+            }
+
+            console.log(`✅ Downloads incremented for file with key ${key} to ${nextDownloads}`);
+            return this._fromDb(data);
         } catch (error) {
             console.error(`❌ Error incrementing downloads for file with key ${key}:`, error);
             throw error;
@@ -166,10 +251,20 @@ class DatabaseService {
      */
     async getAllFiles(limit = 10, skip = 0) {
         try {
-            return await File.find({ isActive: true })
-                .sort({ date: -1 })
-                .skip(skip)
-                .limit(limit);
+            await this._ensureConnection();
+
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .eq('is_active', true)
+                .order('created_at', { ascending: false })
+                .range(skip, skip + limit - 1);
+
+            if (error) {
+                throw error;
+            }
+
+            return (data || []).map(row => this._fromDb(row));
         } catch (error) {
             console.error('❌ Error getting all files:', error);
             throw error;
@@ -184,13 +279,24 @@ class DatabaseService {
      */
     async deactivateFile(key) {
         try {
-            const file = await File.findOneAndUpdate(
-                { key },
-                { isActive: false },
-                { new: true }
-            );
+            await this._ensureConnection();
+
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .update({
+                    is_active: false,
+                    last_accessed: new Date().toISOString()
+                })
+                .eq('key', key)
+                .select('*')
+                .maybeSingle();
+
+            if (error) {
+                throw error;
+            }
+
             console.log(`✅ File deactivated: ${key}`);
-            return file;
+            return this._fromDb(data);
         } catch (error) {
             console.error('❌ Error deactivating file:', error);
             throw error;
@@ -204,22 +310,28 @@ class DatabaseService {
      */
     async getFileStats() {
         try {
-            const stats = await File.aggregate([
-                {
-                    $group: {
-                        _id: null,
-                        totalFiles: { $sum: 1 },
-                        totalDownloads: { $sum: "$downloads" },
-                        totalSize: { $sum: "$fileSize" },
-                        averageDownloads: { $avg: "$downloads" }
-                    }
-                }
-            ]);
-            return stats[0] || {
-                totalFiles: 0,
-                totalDownloads: 0,
-                totalSize: 0,
-                averageDownloads: 0
+            await this._ensureConnection();
+
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('downloads, file_size')
+                .eq('is_active', true);
+
+            if (error) {
+                throw error;
+            }
+
+            const rows = data || [];
+            const totalFiles = rows.length;
+            const totalDownloads = rows.reduce((sum, r) => sum + (r.downloads || 0), 0);
+            const totalSize = rows.reduce((sum, r) => sum + (r.file_size || 0), 0);
+            const averageDownloads = totalFiles > 0 ? totalDownloads / totalFiles : 0;
+
+            return {
+                totalFiles,
+                totalDownloads,
+                totalSize,
+                averageDownloads
             };
         } catch (error) {
             console.error('❌ Error getting file stats:', error);
@@ -235,12 +347,22 @@ class DatabaseService {
      */
     async deactivateFilesByMessageId(messageId) {
         try {
-            const result = await File.updateMany(
-                { messageId, isActive: true },
-                { isActive: false, lastAccessed: new Date() }
-            );
+            await this._ensureConnection();
 
-            return result.modifiedCount;
+            const { error, count } = await supabase
+                .from(this.tableName)
+                .update({
+                    is_active: false,
+                    last_accessed: new Date().toISOString()
+                }, { count: 'exact' })
+                .eq('message_id', messageId)
+                .eq('is_active', true);
+
+            if (error) {
+                throw error;
+            }
+
+            return count || 0;
         } catch (error) {
             console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
             throw error;
@@ -256,7 +378,25 @@ class DatabaseService {
     async updateFileByMessageId(messageId, updateData) {
         try {
             await this._ensureConnection();
-            return await File.updateOne({ messageId }, { $set: updateData });
+
+            const patch = {};
+            if (updateData.fileId !== undefined) patch.file_id = updateData.fileId;
+            if (updateData.fileName !== undefined) patch.file_name = updateData.fileName;
+            if (updateData.fileSize !== undefined) patch.file_size = updateData.fileSize;
+            if (updateData.caption !== undefined) patch.caption = updateData.caption;
+
+            const { error, count } = await supabase
+                .from(this.tableName)
+                .update(patch, { count: 'exact' })
+                .eq('message_id', messageId);
+
+            if (error) {
+                throw error;
+            }
+
+            return {
+                nModified: count || 0
+            };
         } catch (error) {
             console.error(`❌ Error updating file for message ID ${messageId}:`, error);
             throw error;
@@ -264,4 +404,4 @@ class DatabaseService {
     }
 }
 
-module.exports = new DatabaseService(); 
+module.exports = new DatabaseService();

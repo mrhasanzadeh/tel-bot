@@ -253,6 +253,108 @@ class FileHandlerService {
     }
 
     /**
+     * Send all files in a pack to user
+     * @param {Object} ctx - Telegram context
+     * @param {string} packSlug - Pack slug
+     * @param {{ cancelled?: boolean }} [cancelToken] - Optional cancellation token
+     * @returns {Promise<boolean>} Whether sending started successfully
+     */
+    async sendPackToUser(ctx, packSlug, cancelToken = { cancelled: false }) {
+        try {
+            const slug = String(packSlug ?? '').trim().toLowerCase();
+            if (!slug) {
+                await ctx.reply('⚠️ پک معتبر نیست.');
+                return false;
+            }
+
+            console.log(`📦 Looking up file pack with slug: ${slug}`);
+            const pack = await databaseService.getFilePackBySlug(slug);
+
+            if (!pack) {
+                await ctx.reply('⚠️ پک مورد نظر یافت نشد!');
+                return false;
+            }
+
+            if (pack.isActive === false) {
+                await ctx.reply('❌ این پک دیگر در دسترس نیست.');
+                return false;
+            }
+
+            const items = await databaseService.getFilePackItems(pack.id);
+            if (!items || items.length === 0) {
+                await ctx.reply('⚠️ این پک هنوز فایلی ندارد.');
+                return false;
+            }
+
+            await ctx.reply(
+                `📦 ارسال پک شروع شد: ${pack.title || pack.slug}\n` +
+                    `تعداد فایل‌ها: ${items.length}\n` +
+                    `برای قطع کردن ارسال: /cancel`
+            );
+
+            let sent = 0;
+            for (const it of items) {
+                if (cancelToken?.cancelled) {
+                    await ctx.reply(`⛔️ ارسال پک متوقف شد. (${sent}/${items.length})`);
+                    return true;
+                }
+
+                const fileKey = String(it.fileKey ?? '').trim();
+                if (!fileKey) continue;
+
+                const fileData = await databaseService.getFileByKey(fileKey);
+                if (!fileData || !fileData.isActive) {
+                    continue;
+                }
+
+                try {
+                    const forwardedMessage = await ctx.telegram.copyMessage(
+                        ctx.chat.id,
+                        config.PRIVATE_CHANNEL_ID,
+                        fileData.messageId,
+                        { caption: '' }
+                    );
+
+                    sent += 1;
+
+                    await databaseService.incrementFileDownloads(fileKey);
+
+                    setTimeout(async () => {
+                        try {
+                            if (ctx.chat.type === 'private') {
+                                await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                    }, 30000);
+
+                    await delay(1200);
+                } catch (e) {
+                    console.error('❌ Error sending pack file:', e);
+                    await delay(1500);
+                }
+            }
+
+            if (cancelToken?.cancelled) {
+                await ctx.reply(`⛔️ ارسال پک متوقف شد. (${sent}/${items.length})`);
+            } else {
+                await ctx.reply(
+                    `✅ ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
+                        '⏱️ فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n' +
+                        '✅ برای نگه‌داشتن فایل‌ها، آن‌ها را به Saved Messages یا یک چت دیگر فوروارد کنید.'
+                );
+            }
+
+            return true;
+        } catch (error) {
+            console.error('❌ Error in sendPackToUser:', error);
+            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+            return false;
+        }
+    }
+
+    /**
      * Extract file data from message
      * @private
      * @param {Object} message - Telegram message
