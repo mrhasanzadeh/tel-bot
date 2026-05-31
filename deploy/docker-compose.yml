@@ -9,12 +9,15 @@ services:
       - com.centurylinklabs.watchtower.enable=true
 
   watchtower:
-    image: containrrr/watchtower:latest
+    # containrrr/watchtower is unmaintained and breaks on Docker Engine 29+ (API >= 1.40)
+    # GHCR: ghcr.io/nicholas-fedor/watchtower:latest
+    image: nickfedor/watchtower:latest
     container_name: tel-bot-watchtower
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      DOCKER_API_VERSION: ${DOCKER_API_VERSION:-1.44}
       WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_LABEL_ENABLE: "true"
