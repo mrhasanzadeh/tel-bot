@@ -1,5 +1,7 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
+const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
+const botReply = require('../utils/botReply');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -124,9 +126,9 @@ function setupHandlers(bot) {
                 if (token) {
                     token.cancelled = true;
                     activePackSends.delete(userId);
-                    await ctx.reply('⛔️ ارسال پک متوقف شد.');
+                    await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد.`);
                 } else {
-                    await ctx.reply('ℹ️ ارسال فعالی برای متوقف کردن وجود ندارد.');
+                    await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
                 }
                 return;
             }
@@ -153,19 +155,22 @@ function setupHandlers(bot) {
                     pendingLinks.set(userId, req);
                     console.log(`📝 Stored pending request for user ${userId}`);
 
-                    await ctx.reply(
+                    await botReply.reply(
+                        ctx,
                         createMembershipMessage(memberships),
                         { reply_markup: createJoinButtons(userId) }
                     );
                 }
             } else {
                 if (isAllMember) {
-                    await ctx.reply(
-                        `🤖 به ربات شیوری خوش آمدید.\n\n🔍 کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
+                    await botReply.reply(
+                        ctx,
+                        `${e('bot')} به ربات شیوری خوش آمدید.\n\n${e('search')} کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
                         { disable_web_page_preview: true }
                     );
                 } else {
-                    await ctx.reply(
+                    await botReply.reply(
+                        ctx,
                         createMembershipMessage(memberships),
                         { reply_markup: createJoinButtons(userId) }
                     );
@@ -173,7 +178,7 @@ function setupHandlers(bot) {
             }
         } catch (error) {
             console.error('❌ Error handling start command:', error);
-            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+            await botReply.reply(ctx, 'متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
         }
     });
 
@@ -183,7 +188,7 @@ function setupHandlers(bot) {
         const { isAllMember, memberships } = await membershipService.isMember(userId);
 
         if (isAllMember) {
-            await ctx.editMessageText('✅ شما در همه کانال‌ها عضو هستید. حالا می‌توانید فایل‌ها را دریافت کنید.');
+            await botReply.editMessageText(ctx, `${e('success')} شما در همه کانال‌ها عضو هستید. حالا می‌توانید فایل‌ها را دریافت کنید.`);
             const pendingLink = pendingLinks.get(userId);
             if (pendingLink) {
                 if (typeof pendingLink === 'object' && pendingLink.kind === 'pack') {
@@ -200,7 +205,7 @@ function setupHandlers(bot) {
             }
         } else {
             const message = createMembershipMessage(memberships);
-            await ctx.editMessageText(message, { reply_markup: createJoinButtons(userId) });
+            await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(userId) });
         }
     });
 
@@ -211,9 +216,9 @@ function setupHandlers(bot) {
         if (token) {
             token.cancelled = true;
             activePackSends.delete(userId);
-            await ctx.reply('⛔️ ارسال پک متوقف شد.');
+            await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد.`);
         } else {
-            await ctx.reply('ℹ️ ارسال فعالی برای متوقف کردن وجود ندارد.');
+            await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
         }
     });
 
@@ -225,7 +230,7 @@ function setupHandlers(bot) {
 
             const req = parseRequest(ctx.message.text);
             if (!req) {
-                await ctx.reply('⚠️ کلید/پک معتبر نیست.');
+                await botReply.reply(ctx, `${e('warning')} کلید/پک معتبر نیست.`);
                 return;
             }
 
@@ -235,7 +240,7 @@ function setupHandlers(bot) {
                 
                 // Send membership status and join buttons
                 const message = createMembershipMessage(memberships);
-                await ctx.reply(message, { reply_markup: createJoinButtons(userId) });
+                await botReply.reply(ctx, message, { reply_markup: createJoinButtons(userId) });
                 return;
             }
 
@@ -250,7 +255,7 @@ function setupHandlers(bot) {
             }
         } catch (error) {
             console.error('❌ Error handling file request:', error);
-            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+            await botReply.reply(ctx, 'متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
         }
     });
 }
@@ -263,11 +268,23 @@ function createJoinButtons(userId) {
     return {
         inline_keyboard: [
             [
-                { text: '👥 عضویت در کانال اول', url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}` },
-                { text: '👥 عضویت در کانال دوم', url: `https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}` }
+                inlineButton({
+                    text: 'عضویت در کانال اول',
+                    emojiKey: 'users',
+                    url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}`
+                }),
+                inlineButton({
+                    text: 'عضویت در کانال دوم',
+                    emojiKey: 'users',
+                    url: `https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`
+                })
             ],
             [
-                { text: '✅ بررسی عضویت', callback_data: `check_membership_${userId}` }
+                inlineButton({
+                    text: 'بررسی عضویت',
+                    emojiKey: 'success',
+                    callback_data: `check_membership_${userId}`
+                })
             ]
         ]
     };
@@ -279,13 +296,13 @@ function createJoinButtons(userId) {
  * @returns {string} Status message
  */
 function createMembershipMessage(memberships) {
-    let message = '📢 وضعیت عضویت شما:\n\n';
-    
-    for (const [username, status] of Object.entries(memberships)) {
-        const emoji = status.isMember ? '✅' : '❌';
-        message += `${emoji} ${status.name}\n`;
+    let message = `${e('megaphone')} وضعیت عضویت شما:\n\n`;
+
+    for (const [, status] of Object.entries(memberships)) {
+        const emoji = status.isMember ? e('success') : e('error');
+        message += `${emoji} ${escapeHtml(status.name)}\n`;
     }
-    
+
     message += '\nبرای دریافت فایل، لطفاً در همه کانال‌ها عضو شوید.';
     return message;
 }

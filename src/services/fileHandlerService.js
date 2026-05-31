@@ -1,6 +1,8 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
 const { generateFileKey, delay, formatFileSize } = require('../utils/fileUtils');
+const { e, escapeHtml } = require('../utils/premiumEmoji');
+const botReply = require('../utils/botReply');
 
 /**
  * Service for handling file operations
@@ -175,13 +177,13 @@ class FileHandlerService {
             
             if (!fileData) {
                 console.log('❌ File not found in database');
-                await ctx.reply('⚠️ فایل مورد نظر یافت نشد!');
+                await botReply.reply(ctx, `${e('warning')} فایل مورد نظر یافت نشد!`);
                 return false;
             }
             
             if (!fileData.isActive) {
                 console.log('❌ File is no longer active');
-                await ctx.reply('❌ این فایل دیگر در دسترس نیست.');
+                await botReply.reply(ctx, `${e('error')} این فایل دیگر در دسترس نیست.`);
                 return false;
             }
             
@@ -198,8 +200,9 @@ class FileHandlerService {
                 console.log('✅ File sent successfully');
                 
                 // Send deletion notice as a new message
-                const noticeMessage = await ctx.reply(
-                    '⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n✅ جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.'
+                const noticeMessage = await botReply.reply(
+                    ctx,
+                    `${e('timer')} فایل ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n${e('success')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
                 );
                 
                 // Update download statistics
@@ -242,12 +245,12 @@ class FileHandlerService {
                 return true;
             } catch (error) {
                 console.error('❌ Error copying message:', error);
-                await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
+                await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
                 return false;
             }
         } catch (error) {
             console.error('❌ Error in sendFileToUser:', error);
-            await ctx.reply('⚠️ خطا در ارسال فایل. لطفاً دوباره تلاش کنید.');
+            await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
             return false;
         }
     }
@@ -263,7 +266,7 @@ class FileHandlerService {
         try {
             const slug = String(packSlug ?? '').trim().toLowerCase();
             if (!slug) {
-                await ctx.reply('⚠️ پک معتبر نیست.');
+                await botReply.reply(ctx, `${e('warning')} پک معتبر نیست.`);
                 return false;
             }
 
@@ -271,23 +274,24 @@ class FileHandlerService {
             const pack = await databaseService.getFilePackBySlug(slug);
 
             if (!pack) {
-                await ctx.reply('⚠️ پک مورد نظر یافت نشد!');
+                await botReply.reply(ctx, `${e('warning')} پک مورد نظر یافت نشد!`);
                 return false;
             }
 
             if (pack.isActive === false) {
-                await ctx.reply('❌ این پک دیگر در دسترس نیست.');
+                await botReply.reply(ctx, `${e('error')} این پک دیگر در دسترس نیست.`);
                 return false;
             }
 
             const items = await databaseService.getFilePackItems(pack.id);
             if (!items || items.length === 0) {
-                await ctx.reply('⚠️ این پک هنوز فایلی ندارد.');
+                await botReply.reply(ctx, `${e('warning')} این پک هنوز فایلی ندارد.`);
                 return false;
             }
 
-            await ctx.reply(
-                `📦 ارسال پک شروع شد: ${pack.title || pack.slug}\n` +
+            await botReply.reply(
+                ctx,
+                `${e('package')} ارسال پک شروع شد: ${escapeHtml(pack.title || pack.slug)}\n` +
                     `تعداد فایل‌ها: ${items.length}\n` +
                     `برای قطع کردن ارسال: /cancel`
             );
@@ -295,7 +299,7 @@ class FileHandlerService {
             let sent = 0;
             for (const it of items) {
                 if (cancelToken?.cancelled) {
-                    await ctx.reply(`⛔️ ارسال پک متوقف شد. (${sent}/${items.length})`);
+                    await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
                     return true;
                 }
 
@@ -337,19 +341,20 @@ class FileHandlerService {
             }
 
             if (cancelToken?.cancelled) {
-                await ctx.reply(`⛔️ ارسال پک متوقف شد. (${sent}/${items.length})`);
+                await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
             } else {
-                await ctx.reply(
-                    `✅ ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
-                        '⏱️ فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n' +
-                        '✅ برای نگه‌داشتن فایل‌ها، آن‌ها را به Saved Messages یا یک چت دیگر فوروارد کنید.'
+                await botReply.reply(
+                    ctx,
+                    `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
+                        `${e('timer')} فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n` +
+                        `${e('success')} برای نگه‌داشتن فایل‌ها، آن‌ها را به Saved Messages یا یک چت دیگر فوروارد کنید.`
                 );
             }
 
             return true;
         } catch (error) {
             console.error('❌ Error in sendPackToUser:', error);
-            await ctx.reply('متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
+            await botReply.reply(ctx, 'متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
             return false;
         }
     }
