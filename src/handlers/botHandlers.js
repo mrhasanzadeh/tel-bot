@@ -48,6 +48,39 @@ function requestPackCancel(userId) {
     return true;
 }
 
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {string} userId
+ */
+async function handlePackCancelRequest(ctx, userId) {
+    if (String(ctx.from.id) !== userId) {
+        if (ctx.callbackQuery) {
+            await ctx.answerCbQuery('این دکمه برای شما نیست.', { show_alert: true });
+        }
+        return;
+    }
+
+    if (requestPackCancel(userId)) {
+        if (ctx.callbackQuery) {
+            await ctx.answerCbQuery('در حال توقف ارسال پک...');
+            try {
+                await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+            } catch {
+                // message may already be edited or deleted
+            }
+        } else {
+            await botReply.reply(ctx, `${e('stop')} در حال توقف ارسال پک...`);
+        }
+        return;
+    }
+
+    if (ctx.callbackQuery) {
+        await ctx.answerCbQuery('ارسال فعالی برای متوقف کردن وجود ندارد.', { show_alert: true });
+    } else {
+        await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
+    }
+}
+
 function parseRequest(input) {
     if (!input) return null;
 
@@ -161,11 +194,7 @@ function setupHandlers(bot) {
 
             // Allow cancelling active pack sends
             if (startPayload && String(startPayload).trim().toLowerCase() === 'cancel') {
-                if (requestPackCancel(userId)) {
-                    await botReply.reply(ctx, `${e('stop')} در حال توقف ارسال پک...`);
-                } else {
-                    await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
-                }
+                await handlePackCancelRequest(ctx, userId);
                 return;
             }
 
@@ -239,14 +268,13 @@ function setupHandlers(bot) {
         }
     });
 
-    // Allow cancelling an active pack send
+    // Cancel active pack send via inline button or /cancel
+    bot.action(/cancel_pack_(.+)/, async (ctx) => {
+        await handlePackCancelRequest(ctx, String(ctx.match[1]));
+    });
+
     bot.command('cancel', async (ctx) => {
-        const userId = String(ctx.from.id);
-        if (requestPackCancel(userId)) {
-            await botReply.reply(ctx, `${e('stop')} در حال توقف ارسال پک...`);
-        } else {
-            await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
-        }
+        await handlePackCancelRequest(ctx, String(ctx.from.id));
     });
 
     // Handle file requests

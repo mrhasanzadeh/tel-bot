@@ -1,7 +1,7 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
 const { generateFileKey, delay, delayCancellable, formatFileSize } = require('../utils/fileUtils');
-const { e, escapeHtml } = require('../utils/premiumEmoji');
+const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 
 /**
@@ -289,11 +289,24 @@ class FileHandlerService {
                 return false;
             }
 
+            const packTitle = escapeHtml(pack.title || pack.slug);
+            const userId = String(ctx.from.id);
+
             await botReply.reply(
                 ctx,
-                `${e('package')} ارسال پک شروع شد: ${escapeHtml(pack.title || pack.slug)}\n` +
-                    `تعداد فایل‌ها: ${items.length}\n` +
-                    `برای قطع کردن ارسال: /cancel`
+                `${e('package')} ارسال پک شروع شد: <b>${packTitle}</b>\n` +
+                    `تعداد فایل‌ها: ${items.length}`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [[
+                            inlineButton({
+                                text: 'توقف ارسال',
+                                emojiKey: 'stop',
+                                callback_data: `cancel_pack_${userId}`
+                            })
+                        ]]
+                    }
+                }
             );
 
             let sent = 0;

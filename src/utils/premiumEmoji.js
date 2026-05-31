@@ -73,14 +73,15 @@ function messageOpts(extra = {}) {
 }
 
 /**
- * @param {{ text: string, emojiKey?: keyof typeof FALLBACK, url?: string, callback_data?: string }} opts
+ * @param {{ text: string, emojiKey?: keyof typeof FALLBACK, url?: string, callback_data?: string, style?: string }} opts
  * @returns {import('telegraf/types').InlineKeyboardButton}
  */
-function inlineButton({ text, emojiKey, url, callback_data }) {
+function inlineButton({ text, emojiKey, url, callback_data, style }) {
     const btn = { text };
 
     if (url) btn.url = url;
     if (callback_data) btn.callback_data = callback_data;
+    if (style) btn.style = style;
 
     const id = emojiKey ? IDS[emojiKey] : '';
     if (id) {
