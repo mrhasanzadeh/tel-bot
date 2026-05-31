@@ -22,13 +22,15 @@ const FALLBACK = {
     package: '📦'
 };
 
+const DEFAULT_IDS = require('../config/premiumEmojiDefaults');
 const ENV_KEYS = Object.keys(FALLBACK);
 
 function loadIds() {
     const ids = {};
     for (const key of ENV_KEYS) {
         const envName = `CUSTOM_EMOJI_${key.toUpperCase()}`;
-        ids[key] = (process.env[envName] || '').trim();
+        const fromEnv = (process.env[envName] || '').trim();
+        ids[key] = fromEnv || DEFAULT_IDS[key] || '';
     }
     return ids;
 }

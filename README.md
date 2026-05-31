@@ -57,13 +57,8 @@ User-facing messages can show Telegram premium (animated) emoji instead of stand
 
 1. **Requirement:** The account that owns the bot must have **Telegram Premium**, or the bot must have an upgraded username linked via [Fragment](https://fragment.com/).
 2. **Get emoji IDs:** Send your custom emoji in any chat, forward that message to [@RawDataBot](https://t.me/RawDataBot), and copy `custom_emoji_id` from `entities` (type `custom_emoji`). The `alt` field in the sticker is the fallback character you must keep (e.g. `✅`).
-3. **Configure:** Add IDs to `.env` (see `.env.example`), for example:
-   ```
-   CUSTOM_EMOJI_SUCCESS=5458672011788167217
-   CUSTOM_EMOJI_ERROR=5458672011788167218
-   ```
-   Keys: `success`, `error`, `warning`, `timer`, `bot`, `search`, `megaphone`, `users`, `stop`, `info`, `package`.
-4. Restart the bot. If no IDs are set, messages fall back to normal emoji (`✅`, `❌`, …).
+3. **Defaults:** IDs are in `src/config/premiumEmojiDefaults.js` (same values as `.env.example`). To override, set `CUSTOM_EMOJI_<KEY>` in `.env`.
+4. Restart the bot. Clear a key in `.env` or defaults file to fall back to standard emoji for that icon only.
 
 ## How It Works
 
