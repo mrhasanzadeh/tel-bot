@@ -29,6 +29,23 @@ function generateFileKey() {
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Delay that can be interrupted when cancelToken.cancelled becomes true
+ * @param {number} ms
+ * @param {{ cancelled?: boolean } | null | undefined} [cancelToken]
+ * @returns {Promise<void>}
+ */
+async function delayCancellable(ms, cancelToken) {
+    const step = 200;
+    let remaining = ms;
+    while (remaining > 0) {
+        if (cancelToken?.cancelled) return;
+        const chunk = Math.min(step, remaining);
+        await delay(chunk);
+        remaining -= chunk;
+    }
+}
+
+/**
  * Updates message tracking when a message is deleted
  * @param {Map} trackedMessages - Map of tracked messages
  * @param {string|number} chatId - Chat ID
@@ -55,5 +72,6 @@ module.exports = {
     formatFileSize,
     generateFileKey,
     delay,
+    delayCancellable,
     markMessageDeleted
 }; 

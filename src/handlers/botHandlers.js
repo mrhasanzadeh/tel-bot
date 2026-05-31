@@ -9,6 +9,45 @@ const pendingLinks = new Map();
 // Store active pack send operations per user for cancellation
 const activePackSends = new Map();
 
+/**
+ * Start pack send without blocking the update handler (so /cancel can run in parallel).
+ * @param {import('telegraf').Context} ctx
+ * @param {string} packSlug
+ * @param {string} userId
+ */
+function startPackSend(ctx, packSlug, userId) {
+    const existing = activePackSends.get(userId);
+    if (existing) {
+        existing.cancelled = true;
+    }
+
+    const token = { cancelled: false };
+    activePackSends.set(userId, token);
+
+    fileHandlerService
+        .sendPackToUser(ctx, packSlug, token)
+        .catch((error) => {
+            console.error('❌ Error in background pack send:', error);
+            botReply.reply(ctx, 'متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.').catch(() => {});
+        })
+        .finally(() => {
+            if (activePackSends.get(userId) === token) {
+                activePackSends.delete(userId);
+            }
+        });
+}
+
+/**
+ * @param {string} userId
+ * @returns {boolean} Whether a pack send was marked for cancellation
+ */
+function requestPackCancel(userId) {
+    const token = activePackSends.get(userId);
+    if (!token || token.cancelled) return false;
+    token.cancelled = true;
+    return true;
+}
+
 function parseRequest(input) {
     if (!input) return null;
 
@@ -122,11 +161,8 @@ function setupHandlers(bot) {
 
             // Allow cancelling active pack sends
             if (startPayload && String(startPayload).trim().toLowerCase() === 'cancel') {
-                const token = activePackSends.get(userId);
-                if (token) {
-                    token.cancelled = true;
-                    activePackSends.delete(userId);
-                    await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد.`);
+                if (requestPackCancel(userId)) {
+                    await botReply.reply(ctx, `${e('stop')} در حال توقف ارسال پک...`);
                 } else {
                     await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
                 }
@@ -143,10 +179,7 @@ function setupHandlers(bot) {
 
                 if (isAllMember) {
                     if (req.kind === 'pack') {
-                        const token = { cancelled: false };
-                        activePackSends.set(userId, token);
-                        await fileHandlerService.sendPackToUser(ctx, req.value, token);
-                        activePackSends.delete(userId);
+                        startPackSend(ctx, req.value, userId);
                     } else {
                         await fileHandlerService.sendFileToUser(ctx, req.value);
                     }
@@ -192,10 +225,7 @@ function setupHandlers(bot) {
             const pendingLink = pendingLinks.get(userId);
             if (pendingLink) {
                 if (typeof pendingLink === 'object' && pendingLink.kind === 'pack') {
-                    const token = { cancelled: false };
-                    activePackSends.set(userId, token);
-                    await fileHandlerService.sendPackToUser(ctx, pendingLink.value, token);
-                    activePackSends.delete(userId);
+                    startPackSend(ctx, pendingLink.value, userId);
                 } else if (typeof pendingLink === 'object' && pendingLink.kind === 'file') {
                     await fileHandlerService.sendFileToUser(ctx, pendingLink.value);
                 } else if (typeof pendingLink === 'string') {
@@ -212,11 +242,8 @@ function setupHandlers(bot) {
     // Allow cancelling an active pack send
     bot.command('cancel', async (ctx) => {
         const userId = String(ctx.from.id);
-        const token = activePackSends.get(userId);
-        if (token) {
-            token.cancelled = true;
-            activePackSends.delete(userId);
-            await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد.`);
+        if (requestPackCancel(userId)) {
+            await botReply.reply(ctx, `${e('stop')} در حال توقف ارسال پک...`);
         } else {
             await botReply.reply(ctx, `${e('info')} ارسال فعالی برای متوقف کردن وجود ندارد.`);
         }
@@ -246,10 +273,7 @@ function setupHandlers(bot) {
 
             // User is a member
             if (req.kind === 'pack') {
-                const token = { cancelled: false };
-                activePackSends.set(userId, token);
-                await fileHandlerService.sendPackToUser(ctx, req.value, token);
-                activePackSends.delete(userId);
+                startPackSend(ctx, req.value, userId);
             } else {
                 await fileHandlerService.sendFileToUser(ctx, req.value);
             }

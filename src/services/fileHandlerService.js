@@ -1,6 +1,6 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
-const { generateFileKey, delay, formatFileSize } = require('../utils/fileUtils');
+const { generateFileKey, delay, delayCancellable, formatFileSize } = require('../utils/fileUtils');
 const { e, escapeHtml } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 
@@ -297,9 +297,17 @@ class FileHandlerService {
             );
 
             let sent = 0;
+            let stopNotified = false;
+
+            const notifyStopped = async () => {
+                if (stopNotified) return;
+                stopNotified = true;
+                await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
+            };
+
             for (const it of items) {
                 if (cancelToken?.cancelled) {
-                    await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
+                    await notifyStopped();
                     return true;
                 }
 
@@ -312,6 +320,11 @@ class FileHandlerService {
                 }
 
                 try {
+                    if (cancelToken?.cancelled) {
+                        await notifyStopped();
+                        return true;
+                    }
+
                     const forwardedMessage = await ctx.telegram.copyMessage(
                         ctx.chat.id,
                         config.PRIVATE_CHANNEL_ID,
@@ -328,25 +341,25 @@ class FileHandlerService {
                             if (ctx.chat.type === 'private') {
                                 await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
                             }
-                        } catch (e) {
+                        } catch (err) {
                             // ignore
                         }
                     }, 30000);
 
-                    await delay(1200);
-                } catch (e) {
-                    console.error('❌ Error sending pack file:', e);
-                    await delay(1500);
+                    await delayCancellable(1200, cancelToken);
+                } catch (err) {
+                    console.error('❌ Error sending pack file:', err);
+                    await delayCancellable(1500, cancelToken);
                 }
             }
 
             if (cancelToken?.cancelled) {
-                await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
+                await notifyStopped();
             } else {
                 await botReply.reply(
                     ctx,
                     `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
-                        `${e('timer')} فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n` +
+                        `${e('timer')} فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n\n` +
                         `${e('success')} برای نگه‌داشتن فایل‌ها، آن‌ها را به Saved Messages یا یک چت دیگر فوروارد کنید.`
                 );
             }
