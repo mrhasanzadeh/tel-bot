@@ -145,9 +145,15 @@ function setupHandlers(bot) {
             const chatId = ctx.chat.id;
             const messageId = ctx.channelPost.message_id;
             
-            if (chatId && messageId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+            const privateId = process.env.PRIVATE_CHANNEL_ID;
+            const archiveId = process.env.LINKS_CHANNEL_ID;
+
+            if (chatId && messageId && privateId && chatId.toString() === privateId.toString()) {
                 console.log('✅ Processing file in private channel');
                 await fileHandlerService.handleNewFile(ctx);
+            } else if (chatId && messageId && archiveId && chatId.toString() === archiveId.toString()) {
+                console.log('✅ Processing file from archive channel');
+                await fileHandlerService.handleArchiveChannelPost(ctx);
             }
         } catch (error) {
             console.error('❌ Error handling channel post:', error);

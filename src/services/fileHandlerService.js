@@ -20,41 +20,83 @@ class FileHandlerService {
     }
 
     /**
-     * Handle a new file in the private channel
+     * Post in archive channel (LINKS_CHANNEL_ID) → copy to PRIVATE_CHANNEL_ID, then register link.
+     * @param {Object} ctx - Telegram context
+     */
+    async handleArchiveChannelPost(ctx) {
+        const message = ctx.channelPost;
+        const file = message.document || message.video || message.audio;
+
+        if (!file) {
+            console.log('❌ No file found in archive channel post');
+            return;
+        }
+
+        const privateChannelId = config.PRIVATE_CHANNEL_ID;
+        if (!privateChannelId) {
+            console.error('❌ PRIVATE_CHANNEL_ID is not set');
+            return;
+        }
+
+        try {
+            const copied = await ctx.telegram.copyMessage(
+                privateChannelId,
+                ctx.chat.id,
+                message.message_id
+            );
+            console.log(
+                `✅ Copied archive message ${message.message_id} → private channel message ${copied.message_id}`
+            );
+
+            const storedMessage = { ...message, message_id: copied.message_id };
+            await this._registerNewChannelFile(ctx, storedMessage, privateChannelId);
+        } catch (error) {
+            console.error('❌ Error ingesting archive channel post:', error);
+            if (error.response) {
+                console.error('Telegram API:', error.response.description || error.response);
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Handle a new file posted directly in the private (links) channel.
      * @param {Object} ctx - Telegram context
      * @returns {Promise<void>}
      */
     async handleNewFile(ctx) {
         try {
-            console.log('📨 Processing new file...');
-            const message = ctx.channelPost;
-            const file = message.document || message.video || message.audio;
-            
-            if (!file) {
-                console.log('❌ No file found in message');
-                return;
-            }
-
-            const fileKey = generateFileKey();
-            console.log(`🔑 Generated file key: ${fileKey}`);
-
-            // Create direct link
-            const botUsername = ctx.botInfo?.username;
-            const directLink = `https://t.me/${botUsername}?start=get_${fileKey}`;
-            
-            // Store file information
-            const fileData = this._extractFileData(message, fileKey);
-            await databaseService.createFile(fileData);
-            console.log(`✅ File saved to database with key: ${fileKey}`);
-
-            await this._mirrorPostToLinksChannel(ctx, message);
-
-            // Update message caption or send new message
-            await this._updateMessageCaption(ctx, message, fileKey, directLink, ctx.chat.id);
+            console.log('📨 Processing new file in private channel...');
+            await this._registerNewChannelFile(ctx, ctx.channelPost, ctx.chat.id);
         } catch (error) {
             console.error('❌ Error handling new file:', error);
             throw error;
         }
+    }
+
+    /**
+     * Save file metadata and append key/link to the message in the storage channel.
+     * @private
+     */
+    async _registerNewChannelFile(ctx, message, storageChannelId) {
+        const file = message.document || message.video || message.audio;
+
+        if (!file) {
+            console.log('❌ No file found in message');
+            return;
+        }
+
+        const fileKey = generateFileKey();
+        console.log(`🔑 Generated file key: ${fileKey}`);
+
+        const botUsername = ctx.botInfo?.username;
+        const directLink = `https://t.me/${botUsername}?start=get_${fileKey}`;
+
+        const fileData = this._extractFileData(message, fileKey);
+        await databaseService.createFile(fileData);
+        console.log(`✅ File saved to database with key: ${fileKey}`);
+
+        await this._updateMessageCaption(ctx, message, fileKey, directLink, storageChannelId);
     }
 
     /**
@@ -81,22 +123,7 @@ class FileHandlerService {
                 return;
             }
             
-            const fileKey = generateFileKey();
-            console.log(`🔑 Generated file key: ${fileKey}`);
-            
-            // Create direct link
-            const botUsername = ctx.botInfo?.username;
-            const directLink = `https://t.me/${botUsername}?start=get_${fileKey}`;
-            
-            // Store file information
-            const fileData = this._extractFileData(message, fileKey);
-            await databaseService.createFile(fileData);
-            console.log(`✅ File saved to database with key: ${fileKey}`);
-
-            await this._mirrorPostToLinksChannel(ctx, message);
-
-            // Update message caption or send new message
-            await this._updateMessageCaption(ctx, message, fileKey, directLink, channelId);
+            await this._registerNewChannelFile(ctx, message, channelId);
         } catch (error) {
             console.error('❌ Error processing channel post:', error);
             throw error;
@@ -434,30 +461,6 @@ class FileHandlerService {
         }
 
         return fileData;
-    }
-
-    /**
-     * Copy archive post to links channel (no "forwarded from" header).
-     * Runs before caption edit so the links channel keeps the original post.
-     * @private
-     */
-    async _mirrorPostToLinksChannel(ctx, message) {
-        const linksChannelId = config.LINKS_CHANNEL_ID;
-        if (!linksChannelId) return;
-
-        try {
-            await ctx.telegram.copyMessage(
-                linksChannelId,
-                ctx.chat.id,
-                message.message_id
-            );
-            console.log(`✅ Mirrored message ${message.message_id} to links channel`);
-        } catch (error) {
-            console.error('❌ Error mirroring post to links channel:', error);
-            if (error.response) {
-                console.error('Telegram API:', error.response.description || error.response);
-            }
-        }
     }
 
     /**
