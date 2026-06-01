@@ -45,33 +45,9 @@ async function delayCancellable(ms, cancelToken) {
     }
 }
 
-/**
- * Updates message tracking when a message is deleted
- * @param {Map} trackedMessages - Map of tracked messages
- * @param {string|number} chatId - Chat ID
- * @param {number} messageId - Message ID to remove
- * @returns {boolean} Whether the message was in the tracking list
- */
-function markMessageDeleted(trackedMessages, chatId, messageId) {
-    if (!trackedMessages.has(chatId)) {
-        return false;
-    }
-    
-    const messages = trackedMessages.get(chatId);
-    const wasTracked = messages.has(messageId);
-    
-    if (wasTracked) {
-        messages.delete(messageId);
-        console.log(`Removed message ${messageId} from tracking`);
-    }
-    
-    return wasTracked;
-}
-
 module.exports = {
     formatFileSize,
     generateFileKey,
     delay,
-    delayCancellable,
-    markMessageDeleted
+    delayCancellable
 }; 

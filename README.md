@@ -1,78 +1,82 @@
 # Telegram File Sharing Bot
 
-A modular and robust Telegram bot for sharing files with access control through channel membership verification.
+Telegram bot for sharing files with channel membership verification, pack downloads, and archive → links channel mirroring.
 
 ## Features
 
-- **Access Control**: Files are only accessible to users who have joined a specified channel
-- **File Tracking**: Each file gets a unique key and direct link for tracking
-- **Statistics**: Track download counts and usage patterns
-- **Support for Various Media**: Handles documents, photos, videos, audio files
-- **Error Handling**: Robust error handling and rate limiting management
+- Membership check on two public channels before file/pack delivery
+- Unique file keys and direct `t.me` links
+- File packs with cancellable batch send
+- Archive channel upload → copy to private links channel (no forward label)
+- Premium custom emoji support (optional)
+- Docker + GHCR deploy with Watchtower
 
-## Project Structure
+## Project structure
 
 ```
-├── config.js                 # Configuration variables
-├── index.js                  # Main entry point
-├── .env                      # Environment variables (private)
-└── src
-    ├── exports.js            # Module exports
-    ├── handlers
-    │   └── botHandlers.js    # Bot command and event handlers
-    ├── models
-    │   └── File.js           # Mongoose model for files
-    ├── services
-    │   ├── databaseService.js    # Database operations
-    │   ├── fileHandlerService.js # File processing operations
-    │   └── membershipService.js  # User membership verification
-    └── utils
-        ├── fileUtils.js      # File-related utility functions
-        └── uiUtils.js        # UI-related utility functions
+├── config.js                      # Shared env config
+├── Dockerfile
+├── deploy/
+│   ├── docker-compose.yml
+│   └── .env.example
+├── .github/workflows/docker-ghcr.yml
+└── src/
+    ├── index.js                   # Entry point
+    ├── config/
+    │   └── premiumEmojiDefaults.js
+    ├── handlers/
+    │   └── botHandlers.js         # All bot commands & events
+    ├── services/
+    │   ├── channelIntake.js       # Route channel/supergroup file posts
+    │   ├── channelSetup.js        # Startup channel checks
+    │   ├── channelDiagnostics.js
+    │   ├── databaseService.js     # Supabase
+    │   ├── fileHandlerService.js  # Files, packs, captions, archive copy
+    │   ├── membershipService.js
+    │   └── supabaseClient.js
+    ├── scripts/                   # One-off migrations (Mongo → Supabase)
+    └── utils/
+        ├── botReply.js
+        ├── channelIds.js
+        ├── fileUtils.js
+        └── premiumEmoji.js
 ```
 
 ## Setup
 
-1. Clone the repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Create a `.env` file based on the example below:
-   ```
-   BOT_TOKEN=your_bot_token
-   PRIVATE_CHANNEL_ID=your_private_channel_id
-   PUBLIC_CHANNEL_ID=your_public_channel_id
-   PUBLIC_CHANNEL_USERNAME=your_public_channel_username
-   MONGODB_URI=your_mongodb_connection_string
-   ```
-4. Start the bot:
-   ```
-   npm start
-   ```
+1. `npm install`
+2. Copy `.env.example` → `.env` and fill values (see `deploy/.env.example` for production)
+3. `npm start`
 
-### Premium custom emoji (optional)
+### Main env vars
 
-User-facing messages can show Telegram premium (animated) emoji instead of standard Unicode emoji.
+| Variable | Purpose |
+|----------|---------|
+| `BOT_TOKEN` | Telegram bot token |
+| `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
+| `LINKS_CHANNEL_ID` | Archive upload channel (copied into private) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
+| `PUBLIC_*` / `ADDITIONAL_*` | Membership channels |
+| `PACK_FILE_DELETE_MS` | Pack file auto-delete delay (default `120000`) |
 
-1. **Requirement:** The account that owns the bot must have **Telegram Premium**, or the bot must have an upgraded username linked via [Fragment](https://fragment.com/).
-2. **Get emoji IDs:** Send your custom emoji in any chat, forward that message to [@RawDataBot](https://t.me/RawDataBot), and copy `custom_emoji_id` from `entities` (type `custom_emoji`). The `alt` field in the sticker is the fallback character you must keep (e.g. `✅`).
-3. **Defaults:** IDs are in `src/config/premiumEmojiDefaults.js` (same values as `.env.example`). To override, set `CUSTOM_EMOJI_<KEY>` in `.env`.
-4. Restart the bot. Clear a key in `.env` or defaults file to fall back to standard emoji for that icon only.
+### Premium custom emoji
 
-## How It Works
+See `.env.example`. Defaults in `src/config/premiumEmojiDefaults.js`.
 
-1. Files are posted in a private channel
-2. The bot generates a unique key for each file
-3. Users must join the public channel to access files
-4. File access is tracked for statistics
+## Docker
 
-## Technologies Used
+```bash
+cd deploy
+cp .env.example .env
+docker compose up -d
+```
 
-- Node.js
-- Telegraf (Telegram Bot Framework)
-- MongoDB with Mongoose
-- ES6+ JavaScript features
+## Bot commands (private chat)
+
+- `/start` — welcome / file or pack from deep link
+- `/cancel` — stop active pack send
+- `/checkchannels` — verify bot access to configured channels
+- `/chatid` — reply to a forwarded channel post to see its chat id
 
 ## License
 

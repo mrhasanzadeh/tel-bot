@@ -1,8 +1,20 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
+const { getPrivateChannelId } = require('../utils/channelIds');
 const { generateFileKey, delay, delayCancellable, formatFileSize } = require('../utils/fileUtils');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
+
+/** After pack send finishes, keep files this long (ms). Override: PACK_FILE_DELETE_MS in .env */
+const PACK_FILE_DELETE_MS = config.PACK_FILE_DELETE_MS;
+
+function formatPackDeleteDelayFa(ms) {
+    const seconds = Math.round(ms / 1000);
+    if (seconds >= 60 && seconds % 60 === 0) {
+        return `${seconds / 60} دقیقه`;
+    }
+    return `${seconds} ثانیه`;
+}
 
 /**
  * Service for handling file operations
@@ -105,37 +117,6 @@ class FileHandlerService {
     }
 
     /**
-     * Process a post from the private channel
-     * @param {Object} ctx - Telegram context
-     * @returns {Promise<void>}
-     */
-    async processChannelPost(ctx) {
-        try {
-            console.log('📨 Processing channel post...');
-            const chatId = ctx.chat.id;
-            const channelId = config.PRIVATE_CHANNEL_ID;
-            
-            if (chatId.toString() !== channelId.toString()) {
-                console.log('❌ Not a private channel post, skipping');
-                return;
-            }
-            
-            const message = ctx.channelPost;
-            const file = message.document || message.video || message.audio;
-            
-            if (!file) {
-                console.log('❌ No file found in message');
-                return;
-            }
-            
-            await this._registerNewChannelFile(ctx, message, channelId);
-        } catch (error) {
-            console.error('❌ Error processing channel post:', error);
-            throw error;
-        }
-    }
-
-    /**
      * Handle an edited file in the private channel
      * @param {Object} ctx - Telegram context
      * @returns {Promise<void>}
@@ -145,7 +126,7 @@ class FileHandlerService {
             const message = ctx.editedChannelPost;
             const messageId = message.message_id;
             const chatId = ctx.chat.id;
-            if (chatId.toString() !== process.env.PRIVATE_CHANNEL_ID.toString()) return;
+            if (chatId.toString() !== getPrivateChannelId()) return;
 
             // Only handle if the message contains a file
             const file = message.document || message.video || message.audio || message.photo;
@@ -347,6 +328,8 @@ class FileHandlerService {
 
             let sent = 0;
             let stopNotified = false;
+            const filesToDelete = [];
+            const packDeleteDelayLabel = formatPackDeleteDelayFa(PACK_FILE_DELETE_MS);
 
             const notifyStopped = async () => {
                 if (stopNotified) return;
@@ -354,63 +337,70 @@ class FileHandlerService {
                 await botReply.reply(ctx, `${e('stop')} ارسال پک متوقف شد. (${sent}/${items.length})`);
             };
 
-            for (const it of items) {
-                if (cancelToken?.cancelled) {
-                    await notifyStopped();
-                    return true;
-                }
-
-                const fileKey = String(it.fileKey ?? '').trim();
-                if (!fileKey) continue;
-
-                const fileData = await databaseService.getFileByKey(fileKey);
-                if (!fileData || !fileData.isActive) {
-                    continue;
-                }
-
-                try {
+            try {
+                for (const it of items) {
                     if (cancelToken?.cancelled) {
                         await notifyStopped();
                         return true;
                     }
 
-                    const forwardedMessage = await ctx.telegram.copyMessage(
-                        ctx.chat.id,
-                        config.PRIVATE_CHANNEL_ID,
-                        fileData.messageId,
-                        { caption: '' }
-                    );
+                    const fileKey = String(it.fileKey ?? '').trim();
+                    if (!fileKey) continue;
 
-                    sent += 1;
+                    const fileData = await databaseService.getFileByKey(fileKey);
+                    if (!fileData || !fileData.isActive) {
+                        continue;
+                    }
 
-                    await databaseService.incrementFileDownloads(fileKey);
-
-                    setTimeout(async () => {
-                        try {
-                            if (ctx.chat.type === 'private') {
-                                await ctx.telegram.deleteMessage(ctx.chat.id, forwardedMessage.message_id);
-                            }
-                        } catch (err) {
-                            // ignore
+                    try {
+                        if (cancelToken?.cancelled) {
+                            await notifyStopped();
+                            return true;
                         }
-                    }, 30000);
 
-                    await delayCancellable(1200, cancelToken);
-                } catch (err) {
-                    console.error('❌ Error sending pack file:', err);
-                    await delayCancellable(1500, cancelToken);
+                        const forwardedMessage = await ctx.telegram.copyMessage(
+                            ctx.chat.id,
+                            config.PRIVATE_CHANNEL_ID,
+                            fileData.messageId,
+                            { caption: '' }
+                        );
+
+                        sent += 1;
+                        filesToDelete.push(forwardedMessage.message_id);
+
+                        await databaseService.incrementFileDownloads(fileKey);
+
+                        await delayCancellable(1200, cancelToken);
+                    } catch (err) {
+                        console.error('❌ Error sending pack file:', err);
+                        await delayCancellable(1500, cancelToken);
+                    }
                 }
-            }
 
-            if (cancelToken?.cancelled) {
-                await notifyStopped();
-            } else {
-                await botReply.reply(
-                    ctx,
-                    `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
-                        `${e('timer')} فایل‌های ارسالی ربات بعد از 30 ثانیه از چت پاک می‌شوند.\n\n` +
-                        `${e('warning')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
-                );
+                if (cancelToken?.cancelled) {
+                    await notifyStopped();
+                } else {
+                    await botReply.reply(
+                        ctx,
+                        `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
+                            `${e('timer')} فایل‌های ارسالی ربات ${packDeleteDelayLabel} بعد از اتمام ارسال پک از چت پاک می‌شوند.\n\n` +
+                            `${e('warning')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
+                    );
+                }
+            } finally {
+                if (filesToDelete.length > 0 && ctx.chat.type === 'private') {
+                    const chatId = ctx.chat.id;
+                    const messageIds = [...filesToDelete];
+                    setTimeout(async () => {
+                        for (const messageId of messageIds) {
+                            try {
+                                await ctx.telegram.deleteMessage(chatId, messageId);
+                            } catch {
+                                // ignore
+                            }
+                        }
+                    }, PACK_FILE_DELETE_MS);
+                }
             }
 
             return true;

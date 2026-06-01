@@ -185,7 +185,7 @@ function setupHandlers(bot) {
         try {
             const chatId = ctx.chat.id;
             
-            if (chatId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+            if (chatId && chatId.toString() === getPrivateChannelId()) {
                 const messageIds = ctx.update?.message_delete?.message_ids || [];
                 
                 if (messageIds.length > 0) {
@@ -202,7 +202,7 @@ function setupHandlers(bot) {
         try {
             const chatId = ctx.chat.id;
             const messageId = ctx.editedChannelPost.message_id;
-            if (chatId && messageId && chatId.toString() === process.env.PRIVATE_CHANNEL_ID.toString()) {
+            if (chatId && messageId && chatId.toString() === getPrivateChannelId()) {
                 console.log('✏️ Processing edited file in private channel');
                 await fileHandlerService.handleEditedFile(ctx);
             }

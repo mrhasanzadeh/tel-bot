@@ -1,5 +1,3 @@
-const config = require('../../config');
-
 /**
  * Service for handling membership checks
  * @class MembershipService
