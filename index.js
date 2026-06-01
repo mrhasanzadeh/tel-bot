@@ -275,7 +275,7 @@ bot.command('start', async (ctx) => {
                 await databaseService.incrementFileDownloads(fileKey);
                 
                 // ارسال پیام هشدار پس از ارسال فایل
-                const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
+                const warningMessage = await ctx.reply('⏱️ فایل‌های ارسالی به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
                 
                 // حذف فایل از چت پس از ۳۰ ثانیه
                 setTimeout(async () => {
@@ -342,7 +342,7 @@ bot.action(/^check_membership_(\d+)$/, async (ctx) => {
                     }
 
                     // ارسال پیام هشدار
-                    const warningMessage = await ctx.reply('⏱️ فایل ارسالی ربات به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
+                    const warningMessage = await ctx.reply('⏱️ فایل‌های ارسالی به دلیل مسائل مشخص، بعد از ۳۰ ثانیه از ربات پاک می‌شوند. جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.\n\n🤖 @ShioriUploadBot');
 
                     // حذف فایل بعد از ۳۰ ثانیه
                     setTimeout(async () => {
