@@ -47,6 +47,8 @@ class FileHandlerService {
             await databaseService.createFile(fileData);
             console.log(`✅ File saved to database with key: ${fileKey}`);
 
+            await this._mirrorPostToLinksChannel(ctx, message);
+
             // Update message caption or send new message
             await this._updateMessageCaption(ctx, message, fileKey, directLink, ctx.chat.id);
         } catch (error) {
@@ -90,6 +92,8 @@ class FileHandlerService {
             const fileData = this._extractFileData(message, fileKey);
             await databaseService.createFile(fileData);
             console.log(`✅ File saved to database with key: ${fileKey}`);
+
+            await this._mirrorPostToLinksChannel(ctx, message);
 
             // Update message caption or send new message
             await this._updateMessageCaption(ctx, message, fileKey, directLink, channelId);
@@ -430,6 +434,30 @@ class FileHandlerService {
         }
 
         return fileData;
+    }
+
+    /**
+     * Copy archive post to links channel (no "forwarded from" header).
+     * Runs before caption edit so the links channel keeps the original post.
+     * @private
+     */
+    async _mirrorPostToLinksChannel(ctx, message) {
+        const linksChannelId = config.LINKS_CHANNEL_ID;
+        if (!linksChannelId) return;
+
+        try {
+            await ctx.telegram.copyMessage(
+                linksChannelId,
+                ctx.chat.id,
+                message.message_id
+            );
+            console.log(`✅ Mirrored message ${message.message_id} to links channel`);
+        } catch (error) {
+            console.error('❌ Error mirroring post to links channel:', error);
+            if (error.response) {
+                console.error('Telegram API:', error.response.description || error.response);
+            }
+        }
     }
 
     /**
