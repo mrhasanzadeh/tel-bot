@@ -1,7 +1,13 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
 const { route: routeChannelFile } = require('../services/channelIntake');
-const { isMonitoredChannelChat } = require('../utils/channelIds');
+const { buildChannelStatusReport } = require('../services/channelDiagnostics');
+const {
+    isMonitoredChannelChat,
+    getArchiveChannelId,
+    getPrivateChannelId,
+    normalizeChatId
+} = require('../utils/channelIds');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 
@@ -142,6 +148,26 @@ function extractFileKey(input) {
 function setupHandlers(bot) {
     // channel_post (broadcast) and message (supergroup) file uploads
     bot.use(async (ctx, next) => {
+        const chat = ctx.chat;
+        if (chat && (ctx.channelPost || ctx.message)) {
+            const chatType = chat.type;
+            if (chatType === 'channel' || chatType === 'supergroup') {
+                const chatId = normalizeChatId(chat.id);
+                const archiveId = getArchiveChannelId();
+                const privateId = getPrivateChannelId();
+                const hasFile = Boolean(
+                    (ctx.channelPost || ctx.message)?.document ||
+                    (ctx.channelPost || ctx.message)?.video ||
+                    (ctx.channelPost || ctx.message)?.audio
+                );
+                console.log(
+                    `👀 Channel update chat=${chatId} title="${chat.title || ''}" ` +
+                        `type=${chatType} file=${hasFile} ` +
+                        `matchArchive=${archiveId === chatId} matchPrivate=${privateId === chatId}`
+                );
+            }
+        }
+
         try {
             const handled = await routeChannelFile(ctx, fileHandlerService);
             if (handled) return;
@@ -183,6 +209,44 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('❌ Error handling edited channel post:', error);
         }
+    });
+
+    bot.command('checkchannels', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            const report = await buildChannelStatusReport(bot);
+            await ctx.reply(report);
+        } catch (error) {
+            console.error('checkchannels error:', error);
+            await ctx.reply('خطا در بررسی کانال‌ها.');
+        }
+    });
+
+    bot.command('chatid', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        const replied = ctx.message.reply_to_message;
+        const origin = replied?.forward_origin;
+        const legacyChat = replied?.forward_from_chat;
+
+        if (origin?.type === 'channel' && origin.chat) {
+            await ctx.reply(
+                `کانال مبدأ:\nشناسه: ${origin.chat.id}\nعنوان: ${origin.chat.title || '-'}\n\n` +
+                    `در .env:\nLINKS_CHANNEL_ID=${origin.chat.id}`
+            );
+            return;
+        }
+
+        if (legacyChat?.id) {
+            await ctx.reply(
+                `کانال مبدأ:\nشناسه: ${legacyChat.id}\nعنوان: ${legacyChat.title || '-'}\n\n` +
+                    `در .env:\nLINKS_CHANNEL_ID=${legacyChat.id}`
+            );
+            return;
+        }
+
+        await ctx.reply(
+            'یک پیام (مثلاً همان فایل) را از کانال آرشیو به این چت فوروارد کنید، روی همان پیام Reply بزنید و دوباره /chatid را بفرستید.'
+        );
     });
 
     // Handle /start command

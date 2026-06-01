@@ -32,6 +32,12 @@ if (missingEnvVars.length > 0) {
     throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
 }
 
+if (!process.env.LINKS_CHANNEL_ID?.trim()) {
+    console.warn(
+        '⚠️ LINKS_CHANNEL_ID is not set — archive uploads will not be copied to PRIVATE_CHANNEL_ID'
+    );
+}
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Set up membership service with bot instance

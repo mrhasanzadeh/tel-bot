@@ -34,6 +34,11 @@ async function logChannelSetup(bot) {
             );
         } catch (error) {
             console.error(`❌ ${label} (${chatId}): ${error.message}`);
+            if (label === 'ARCHIVE') {
+                console.error(
+                    '   → بات در کانال آرشیو ادمین نیست یا LINKS_CHANNEL_ID اشتباه است. تا رفع نشود، پست‌های آرشیو به بات نمی‌رسند.'
+                );
+            }
         }
     }
 }
