@@ -7,6 +7,7 @@ const { Telegraf } = require('telegraf');
 const databaseService = require('./services/databaseService');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
+const { logChannelSetup } = require('./services/channelSetup');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -51,9 +52,19 @@ bot.catch((err, ctx) => {
 });
 
 // Start the bot
-bot.launch()
-    .then(() => {
+bot.launch({
+    allowedUpdates: [
+        'message',
+        'channel_post',
+        'edited_channel_post',
+        'edited_message',
+        'callback_query',
+        'message_delete'
+    ]
+})
+    .then(async () => {
         console.log('✅ Bot started successfully');
+        await logChannelSetup(bot);
     })
     .catch(err => {
         console.error('❌ Failed to start bot:', err);

@@ -1,5 +1,7 @@
 const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
+const { route: routeChannelFile } = require('../services/channelIntake');
+const { isMonitoredChannelChat } = require('../utils/channelIds');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 
@@ -138,26 +140,18 @@ function extractFileKey(input) {
  * @returns {void}
  */
 function setupHandlers(bot) {
-    // Handle channel posts
-    bot.on('channel_post', async (ctx) => {
+    // channel_post (broadcast) and message (supergroup) file uploads
+    bot.use(async (ctx, next) => {
         try {
-            console.log('📨 Received channel post');
-            const chatId = ctx.chat.id;
-            const messageId = ctx.channelPost.message_id;
-            
-            const privateId = process.env.PRIVATE_CHANNEL_ID;
-            const archiveId = process.env.LINKS_CHANNEL_ID;
-
-            if (chatId && messageId && privateId && chatId.toString() === privateId.toString()) {
-                console.log('✅ Processing file in private channel');
-                await fileHandlerService.handleNewFile(ctx);
-            } else if (chatId && messageId && archiveId && chatId.toString() === archiveId.toString()) {
-                console.log('✅ Processing file from archive channel');
-                await fileHandlerService.handleArchiveChannelPost(ctx);
-            }
+            const handled = await routeChannelFile(ctx, fileHandlerService);
+            if (handled) return;
         } catch (error) {
-            console.error('❌ Error handling channel post:', error);
+            console.error('❌ Error routing channel file post:', error);
+            if (error.response) {
+                console.error('Telegram API:', error.response.description || error.response);
+            }
         }
+        return next();
     });
 
     // Handle deleted messages
@@ -283,9 +277,11 @@ function setupHandlers(bot) {
         await handlePackCancelRequest(ctx, String(ctx.from.id));
     });
 
-    // Handle file requests
+    // Handle file requests (private chats only — not archive/supergroup channels)
     bot.on('text', async (ctx) => {
         try {
+            if (isMonitoredChannelChat(ctx)) return;
+
             const userId = String(ctx.from.id);
             const { isAllMember, memberships } = await membershipService.isMember(userId);
 

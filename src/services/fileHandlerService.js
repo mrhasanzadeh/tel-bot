@@ -44,11 +44,16 @@ class FileHandlerService {
                 ctx.chat.id,
                 message.message_id
             );
+            const copiedMessageId =
+                typeof copied === 'number' ? copied : copied?.message_id;
+            if (!copiedMessageId) {
+                throw new Error('copyMessage did not return a message_id');
+            }
             console.log(
-                `✅ Copied archive message ${message.message_id} → private channel message ${copied.message_id}`
+                `✅ Copied archive message ${message.message_id} → private channel message ${copiedMessageId}`
             );
 
-            const storedMessage = { ...message, message_id: copied.message_id };
+            const storedMessage = { ...message, message_id: copiedMessageId };
             await this._registerNewChannelFile(ctx, storedMessage, privateChannelId);
         } catch (error) {
             console.error('❌ Error ingesting archive channel post:', error);
