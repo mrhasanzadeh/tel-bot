@@ -24,6 +24,17 @@ function getPublicPostsChannelId() {
     );
 }
 
+/** Schedule publish target — test channel overrides production when set. */
+function getSchedulePublishChannelId() {
+    const testId = normalizeChatId(config.SCHEDULE_TEST_CHANNEL_ID);
+    if (testId) return testId;
+    return getPublicPostsChannelId();
+}
+
+function isScheduleTestMode() {
+    return Boolean(normalizeChatId(config.SCHEDULE_TEST_CHANNEL_ID));
+}
+
 function getAdminUserId() {
     const id = config.ADMIN_USER_ID;
     return id ? String(id).trim() : '';
@@ -72,6 +83,8 @@ module.exports = {
     getPrivateChannelId,
     getArchiveChannelId,
     getPublicPostsChannelId,
+    getSchedulePublishChannelId,
+    isScheduleTestMode,
     getAdminUserId,
     getChannelFilePost,
     isMonitoredChannelChat

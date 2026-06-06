@@ -19,7 +19,20 @@ const FALLBACK = {
     users: '👥',
     stop: '⛔️',
     info: 'ℹ️',
-    package: '📦'
+    package: '📦',
+    // TheShioriSub schedule post captions
+    comet: '☄️',
+    pencil: '✏️',
+    check: '✔️',
+    arrowDown: '⬇️',
+    download: '📥',
+    cool: '🆒',
+    heart: '❤️',
+    donation: '❤️',
+    speech: '🗣️',
+    flag: '🚩',
+    chat: '💬',
+    clipboard: '📋'
 };
 
 const DEFAULT_IDS = require('../config/premiumEmojiDefaults');
@@ -72,6 +85,11 @@ function messageOpts(extra = {}) {
     return { parse_mode: 'HTML', ...extra };
 }
 
+/** Always HTML — for captions/messages that use &amp;, &lt;b&gt;, or tg-emoji tags. */
+function htmlOpts(extra = {}) {
+    return { parse_mode: 'HTML', ...extra };
+}
+
 /**
  * @param {{ text: string, emojiKey?: keyof typeof FALLBACK, url?: string, callback_data?: string, style?: string }} opts
  * @returns {import('telegraf/types').InlineKeyboardButton}
@@ -97,6 +115,7 @@ module.exports = {
     e,
     escapeHtml,
     messageOpts,
+    htmlOpts,
     isEnabled,
     inlineButton,
     FALLBACK

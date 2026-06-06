@@ -6,6 +6,7 @@ const {
     isMonitoredChannelChat,
     getArchiveChannelId,
     getPrivateChannelId,
+    getAdminUserId,
     normalizeChatId
 } = require('../utils/channelIds');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
@@ -214,6 +215,10 @@ function setupHandlers(bot) {
 
     bot.command('checkchannels', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
         try {
             const report = await buildChannelStatusReport(bot);
             await ctx.reply(report);
@@ -225,6 +230,10 @@ function setupHandlers(bot) {
 
     bot.command('chatid', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
         const replied = ctx.message.reply_to_message;
         const origin = replied?.forward_origin;
         const legacyChat = replied?.forward_from_chat;
@@ -311,25 +320,37 @@ function setupHandlers(bot) {
 
     // Handle membership check callback
     bot.action(/check_membership_(.+)/, async (ctx) => {
-        const userId = String(ctx.match[1]);
-        const { isAllMember, memberships } = await membershipService.isMember(userId);
+        const actorId = String(ctx.from.id);
+        const callbackUserId = String(ctx.match[1]);
+
+        if (callbackUserId !== actorId) {
+            await ctx.answerCbQuery('این دکمه برای شما نیست.', { show_alert: true });
+            return;
+        }
+
+        const { isAllMember, memberships } = await membershipService.isMember(actorId);
 
         if (isAllMember) {
-            await botReply.editMessageText(ctx, `${e('success')} شما در همه کانال‌ها عضو هستید. حالا می‌توانید فایل‌ها را دریافت کنید.`);
-            const pendingLink = pendingLinks.get(userId);
+            await ctx.answerCbQuery();
+            await botReply.editMessageText(
+                ctx,
+                `${e('success')} شما در همه کانال‌ها عضو هستید. حالا می‌توانید فایل‌ها را دریافت کنید.`
+            );
+            const pendingLink = pendingLinks.get(actorId);
             if (pendingLink) {
                 if (typeof pendingLink === 'object' && pendingLink.kind === 'pack') {
-                    startPackSend(ctx, pendingLink.value, userId);
+                    startPackSend(ctx, pendingLink.value, actorId);
                 } else if (typeof pendingLink === 'object' && pendingLink.kind === 'file') {
                     await fileHandlerService.sendFileToUser(ctx, pendingLink.value);
                 } else if (typeof pendingLink === 'string') {
                     await fileHandlerService.sendFileToUser(ctx, pendingLink);
                 }
-                pendingLinks.delete(userId);
+                pendingLinks.delete(actorId);
             }
         } else {
+            await ctx.answerCbQuery();
             const message = createMembershipMessage(memberships);
-            await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(userId) });
+            await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(actorId) });
         }
     });
 
@@ -343,6 +364,28 @@ function setupHandlers(bot) {
     bot.action(/^sched_r_(\d+)$/, async (ctx) => {
         await scheduleService.handleApproval(ctx, Number(ctx.match[1]), 'reject');
     });
+    bot.action(/^sched_rep_(\d+)$/, async (ctx) => {
+        await scheduleService.handleRepublish(ctx, Number(ctx.match[1]));
+    });
+
+    bot.action(/^areg_syn_y_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegSynopsisChoice(ctx, true);
+    });
+    bot.action(/^areg_syn_n_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegSynopsisChoice(ctx, false);
+    });
+    bot.action(/^areg_sub_ep_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegSubtitleModeChoice(ctx, 'per_episode');
+    });
+    bot.action(/^areg_sub_pk_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegSubtitleModeChoice(ctx, 'pack_only');
+    });
+    bot.action(/^areg_kar_y_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegKaraokeChoice(ctx, true);
+    });
+    bot.action(/^areg_kar_n_(.+)$/, async (ctx) => {
+        await scheduleService.handleAnimeRegKaraokeChoice(ctx, false);
+    });
 
     // Cancel active pack send via inline button or /cancel
     bot.action(/cancel_pack_(.+)/, async (ctx) => {
@@ -353,10 +396,29 @@ function setupHandlers(bot) {
         await handlePackCancelRequest(ctx, String(ctx.from.id));
     });
 
+    // Schedule cover photo from admin (new anime without template post)
+    bot.on(['photo', 'document'], async (ctx) => {
+        try {
+            if (isMonitoredChannelChat(ctx)) return;
+            if (String(ctx.from?.id) !== getAdminUserId()) return;
+            await scheduleService.handleAdminCoverPhoto(ctx);
+        } catch (error) {
+            console.error('❌ Schedule cover photo handler:', error);
+        }
+    });
+
     // Handle file requests (private chats only — not archive/supergroup channels)
     bot.on('text', async (ctx) => {
         try {
             if (isMonitoredChannelChat(ctx)) return;
+
+            if (String(ctx.from.id) === getAdminUserId()) {
+                const handledReg = await scheduleService.handleAdminAnimeRegistration(ctx);
+                if (handledReg) return;
+
+                const handledPack = await scheduleService.handleAdminPackInfo(ctx);
+                if (handledPack) return;
+            }
 
             const userId = String(ctx.from.id);
             const { isAllMember, memberships } = await membershipService.isMember(userId);

@@ -1,4 +1,10 @@
-const { getArchiveChannelId, getPrivateChannelId } = require('../utils/channelIds');
+const {
+    getArchiveChannelId,
+    getPrivateChannelId,
+    getSchedulePublishChannelId,
+    getPublicPostsChannelId,
+    isScheduleTestMode
+} = require('../utils/channelIds');
 
 /**
  * @param {import('telegraf').Telegraf} bot
@@ -7,9 +13,18 @@ async function logChannelSetup(bot) {
     const archiveId = getArchiveChannelId();
     const privateId = getPrivateChannelId();
 
+    const scheduleId = getSchedulePublishChannelId();
+    const productionScheduleId = getPublicPostsChannelId();
+
     console.log('📡 Channel routing:');
     console.log(`   ARCHIVE (upload)  LINKS_CHANNEL_ID = ${archiveId || '(not set)'}`);
     console.log(`   PRIVATE (links)   PRIVATE_CHANNEL_ID = ${privateId || '(not set)'}`);
+    if (isScheduleTestMode()) {
+        console.log(`   SCHEDULE (TEST)   SCHEDULE_TEST_CHANNEL_ID = ${scheduleId}`);
+        console.log(`   SCHEDULE (prod)   PUBLIC_POSTS_CHANNEL_ID = ${productionScheduleId} (skipped)`);
+    } else {
+        console.log(`   SCHEDULE (posts)  PUBLIC_POSTS_CHANNEL_ID = ${scheduleId || '(not set)'}`);
+    }
 
     if (!archiveId) {
         console.warn('⚠️ LINKS_CHANNEL_ID is not set — archive → private copy is disabled');
@@ -23,7 +38,8 @@ async function logChannelSetup(bot) {
 
     for (const [label, chatId] of [
         ['ARCHIVE', archiveId],
-        ['PRIVATE', privateId]
+        ['PRIVATE', privateId],
+        ['SCHEDULE', scheduleId]
     ]) {
         if (!chatId) continue;
         try {
@@ -37,6 +53,11 @@ async function logChannelSetup(bot) {
             if (label === 'ARCHIVE') {
                 console.error(
                     '   → بات در کانال آرشیو ادمین نیست یا LINKS_CHANNEL_ID اشتباه است. تا رفع نشود، پست‌های آرشیو به بات نمی‌رسند.'
+                );
+            }
+            if (label === 'SCHEDULE') {
+                console.error(
+                    '   → بات در کانال انتشار schedule ادمین نیست — پست‌های TheShioriSub/تست منتشر نمی‌شوند.'
                 );
             }
         }

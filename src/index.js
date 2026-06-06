@@ -27,7 +27,7 @@ const requiredEnvVars = [
     'ADDITIONAL_CHANNEL_USERNAME'
 ];
 
-const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
     console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
     throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
@@ -41,7 +41,6 @@ if (!process.env.LINKS_CHANNEL_ID?.trim()) {
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Set up membership service with bot instance
 membershipService.setTelegram(bot);
 scheduleService.setTelegram(bot);
 
@@ -49,41 +48,35 @@ if (!process.env.ADMIN_USER_ID?.trim()) {
     console.warn('⚠️ ADMIN_USER_ID is not set — schedule approval flow is disabled');
 }
 
-// Connect to database
-databaseService.connect().catch(error => {
-    console.error('❌ Failed to connect to database:', error);
-    process.exit(1);
-});
-
-// Setup all bot handlers
-setupHandlers(bot);
-
-// Handle errors
 bot.catch((err, ctx) => {
     console.error(`Error handling update ${ctx.update.update_id}:`, err);
 });
 
-// Start the bot
-bot.launch({
-    allowedUpdates: [
-        'message',
-        'channel_post',
-        'edited_channel_post',
-        'edited_message',
-        'callback_query',
-        'message_delete'
-    ]
-})
-    .then(async () => {
-        console.log('✅ Bot started successfully');
-        await logChannelSetup(bot);
-    })
-    .catch(err => {
-        console.error('❌ Failed to start bot:', err);
-        process.exit(1);
+async function start() {
+    await databaseService.connect();
+
+    setupHandlers(bot);
+
+    await bot.launch({
+        allowedUpdates: [
+            'message',
+            'channel_post',
+            'edited_channel_post',
+            'edited_message',
+            'callback_query',
+            'message_delete'
+        ]
     });
 
-// Enable graceful stop
+    console.log('✅ Bot started successfully');
+    await logChannelSetup(bot);
+}
+
+start().catch((err) => {
+    console.error('❌ Failed to start bot:', err);
+    process.exit(1);
+});
+
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 

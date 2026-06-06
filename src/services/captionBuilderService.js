@@ -1,6 +1,9 @@
 /**
- * Build TheShioriSub schedule post captions (plain text — matches channel style).
+ * Build TheShioriSub schedule post captions (HTML + premium emoji when configured).
  */
+
+const { e, escapeHtml } = require('../utils/premiumEmoji');
+const { buildStaffCreditLabel } = require('../utils/staffFormat');
 
 /**
  * @param {string} botUsername
@@ -15,6 +18,11 @@ function packLink(botUsername, slug) {
     return `https://t.me/${botUsername}?start=pack_${slug}`;
 }
 
+/** Clickable link for HTML parse_mode captions. */
+function tgLink(url, label) {
+    return `<a href="${url}">${label}</a>`;
+}
+
 /**
  * @param {object} opts
  * @returns {string}
@@ -24,6 +32,7 @@ function buildScheduleCaption(opts) {
         botUsername,
         title,
         staff,
+        hasKaraoke = false,
         season,
         episodes,
         newEpisode,
@@ -33,21 +42,31 @@ function buildScheduleCaption(opts) {
         synopsisUrl,
         packEpisodesSlug,
         packSubtitleKey,
-        episodeRangeEnd
+        episodeRangeEnd,
+        subtitleMode = 'per_episode'
     } = opts;
 
+    const packOnly = subtitleMode === 'pack_only';
+
     const lines = [];
-    lines.push(`☄️ زیرنویس اختصاصی انیمه‌ی ${title}`);
+    lines.push(`${e('comet')} زیرنویس اختصاصی انیمه‌ی <b>${escapeHtml(title)}</b>`);
     lines.push('');
-    lines.push(`✏️ Translation & TypeSetting: ${staff}`);
+    lines.push(
+        `${e('pencil')} ${buildStaffCreditLabel(hasKaraoke)} <b>${escapeHtml(staff)}</b>`
+    );
 
     for (const ep of episodes) {
-        const emoji = ep.episode === newEpisode ? '⬇️' : '✔️';
+        const emoji = ep.episode === newEpisode ? e('arrowDown') : e('check');
         const epLabel = String(ep.episode).padStart(2, '0');
-        lines.push(
-            `${emoji} E${epLabel}: [1080p][Softsub] (${fileLink(botUsername, ep.videoKey)}) | ` +
-                `Subtitle (${fileLink(botUsername, ep.subtitleKey)})`
-        );
+        const videoUrl = fileLink(botUsername, ep.videoKey);
+        if (!packOnly && ep.subtitleKey) {
+            const subUrl = fileLink(botUsername, ep.subtitleKey);
+            lines.push(
+                `${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p][Softsub]')} | ${tgLink(subUrl, 'Subtitle')}`
+            );
+        } else {
+            lines.push(`${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p][Softsub]')}`);
+        }
     }
 
     if (completed) {
@@ -56,31 +75,31 @@ function buildScheduleCaption(opts) {
         const rangeStart = '01';
         if (packSubtitleKey) {
             lines.push(
-                `📦 S${String(season).padStart(2, '0')}: Subtitle [${rangeStart}-${rangeEnd}] ` +
-                    `(${fileLink(botUsername, packSubtitleKey)})`
+                `${e('package')} S${String(season).padStart(2, '0')}: Subtitle [${rangeStart}-${rangeEnd}] ` +
+                    tgLink(fileLink(botUsername, packSubtitleKey), 'Download')
             );
         }
         if (packEpisodesSlug) {
             lines.push(
-                `📥 S${String(season).padStart(2, '0')}: Episode [${rangeStart}-${rangeEnd}] ` +
-                    `(${packLink(botUsername, packEpisodesSlug)}) 🆒`
+                `${e('download')} S${String(season).padStart(2, '0')}: Episode [${rangeStart}-${rangeEnd}] ` +
+                    `${tgLink(packLink(botUsername, packEpisodesSlug), 'Pack')} ${e('cool')}`
             );
         }
         lines.push('');
-        lines.push('ممنون که ترجمه‌ی تیم شیوری رو برای تماشای این انیمه انتخاب کردید ❤️');
+        lines.push(`ممنون که ترجمه‌ی تیم شیوری رو برای تماشای این انیمه انتخاب کردید ${e('heart')}`);
     }
 
     lines.push('');
     if (donationUrl) {
-        lines.push(`❤️ Donation (${donationUrl})`);
+        lines.push(`${e('donation')} ${tgLink(donationUrl, 'Donation')}`);
     }
     if (synopsisUrl) {
-        lines.push(`🗣️ Synopsis (${synopsisUrl})`);
+        lines.push(`${e('speech')} ${tgLink(synopsisUrl, 'Synopsis')}`);
     }
     if (hashtag) {
-        lines.push(`🚩 ${hashtag}`);
+        lines.push(`${e('flag')} ${escapeHtml(hashtag)}`);
     }
-    lines.push('💬 @TheShioriSub');
+    lines.push(`${e('chat')} @TheShioriSub`);
 
     return lines.join('\n');
 }

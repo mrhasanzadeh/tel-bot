@@ -46,7 +46,8 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 
 1. `npm install`
 2. Copy `.env.example` → `.env` and fill values (see `deploy/.env.example` for production)
-3. `npm start`
+3. Run SQL in Supabase: `supabase/files_schema.sql`, then `supabase/schedule_schema.sql` (+ v3–v5 migrations if upgrading)
+4. `npm start`
 
 ### Main env vars
 
@@ -77,6 +78,8 @@ docker compose up -d
 2. `npm run schedule:import-chiramune` — seed Chiramune E01–E13
 3. Set `ADMIN_USER_ID` and `PUBLIC_POSTS_CHANNEL_ID` in `.env`
 4. Upload mkv + zip to archive → admin gets preview → approve to publish new post
+5. **New anime** (no template post yet): after preview, send cover photo to the bot in private chat, then approve
+6. Migrations: `schedule_schema_v3_cover_photo.sql`, `v4_pack_info.sql`, `v5_idempotency.sql` if the DB predates those features
 
 ## Bot commands (private chat)
 

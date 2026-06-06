@@ -9,6 +9,7 @@
     "dev": "nodemon src/index.js",
     "migrate:mongo": "node src/scripts/migrateMongoToSupabase.js",
     "migrate:keys": "node src/scripts/migrateFileKeys.js",
+    "reindex:channel": "node src/scripts/reindexPrivateChannel.js",
     "schedule:import-chiramune": "node src/scripts/importChiramuneSchedule.js"
   },
   "keywords": [
