@@ -1,0 +1,16 @@
+
+> tel-bot@1.0.0 reindex:channel
+> node src/scripts/reindexPrivateChannel.js
+
+📡 Reindex channel -1002338800469
+   message_id 2501 → 3200
+   dry_run=false
+(node:14228) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.
+(Use `node --trace-warnings ...` to show where the warning was created)
+… 2600 | restored=98 skipped=0 notFound=2 errors=0
+… 2800 | restored=276 skipped=0 notFound=24 errors=0
+… 3000 | restored=417 skipped=0 notFound=83 errors=0
+… 3200 | restored=582 skipped=0 notFound=118 errors=0
+
+✅ Done
+   restored=582 skipped=0 notFound=118 errors=0

@@ -24,7 +24,7 @@ const supabase = require('../services/supabaseClient');
 const CHANNEL_ID = process.env.REINDEX_CHANNEL_ID || process.env.PRIVATE_CHANNEL_ID;
 const ADMIN_ID = process.env.ADMIN_USER_ID;
 const FROM_ID = Number(process.env.REINDEX_FROM_ID || 1);
-const TO_ID = Number(process.env.REINDEX_TO_ID || 5000);
+const TO_ID = Number(process.env.REINDEX_TO_ID || 3200);
 const DELAY_MS = Number(process.env.REINDEX_DELAY_MS || 80);
 const DRY_RUN = process.env.REINDEX_DRY_RUN === '1';
 
@@ -80,6 +80,63 @@ function isMissingMessageError(err) {
     return code === 400 && (desc.includes('not found') || desc.includes("can't be found"));
 }
 
+function getRetryAfterSeconds(err) {
+    const desc = String(err?.response?.description || err?.message || '');
+    const match = desc.match(/retry after (\d+)/i);
+    return match ? Number(match[1]) : null;
+}
+
+async function readChannelMessage(bot, adminId, channelId, msgId) {
+    const adminChat = String(adminId);
+    const tempIds = [];
+
+    try {
+        const forwarded = await forwardWithRetry(bot, adminId, channelId, msgId);
+        tempIds.push(forwarded.message_id);
+        return forwarded;
+    } catch (err) {
+        const desc = String(err?.response?.description || err?.message || '').toLowerCase();
+        if (!desc.includes("can't be forwarded")) {
+            throw err;
+        }
+    }
+
+    try {
+        const copied = await forwardWithRetry(
+            bot,
+            adminId,
+            channelId,
+            msgId,
+            (telegram, to, from, id) => telegram.copyMessage(to, from, id)
+        );
+        tempIds.push(copied.message_id);
+        const forwarded = await bot.telegram.forwardMessage(adminChat, adminChat, copied.message_id);
+        tempIds.push(forwarded.message_id);
+        return forwarded;
+    } finally {
+        for (const id of tempIds) {
+            await bot.telegram.deleteMessage(adminChat, id).catch(() => {});
+        }
+    }
+}
+
+async function forwardWithRetry(bot, adminId, channelId, msgId, apiCall) {
+    const call = apiCall || ((telegram, to, from, id) => telegram.forwardMessage(to, from, id));
+    for (;;) {
+        try {
+            return await call(bot.telegram, String(adminId), channelId, msgId);
+        } catch (err) {
+            const retryAfter = getRetryAfterSeconds(err);
+            if (retryAfter != null) {
+                console.warn(`⏳ rate limited at msgId=${msgId}, waiting ${retryAfter}s…`);
+                await sleep((retryAfter + 2) * 1000);
+                continue;
+            }
+            throw err;
+        }
+    }
+}
+
 async function main() {
     if (!process.env.BOT_TOKEN) throw new Error('BOT_TOKEN required');
     if (!CHANNEL_ID) {
@@ -100,8 +157,7 @@ async function main() {
 
     for (let msgId = FROM_ID; msgId <= TO_ID; msgId++) {
         try {
-            // forwardMessage returns full payload (caption + file); copyMessage only returns message_id
-            const forwarded = await bot.telegram.forwardMessage(String(ADMIN_ID), CHANNEL_ID, msgId);
+            const forwarded = await readChannelMessage(bot, ADMIN_ID, CHANNEL_ID, msgId);
             const caption = forwarded.caption || '';
             const key = extractKey(caption);
             const file = extractFile(forwarded);

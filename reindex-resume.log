@@ -1,0 +1,31 @@
+
+> tel-bot@1.0.0 reindex:channel
+> node src/scripts/reindexPrivateChannel.js
+
+📡 Reindex channel -1002338800469
+   message_id 227 → 2500
+   dry_run=false
+(node:4376) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.
+(Use `node --trace-warnings ...` to show where the warning was created)
+⏳ rate limited at msgId=227, waiting 677s…
+… 400 | restored=137 skipped=0 notFound=37 errors=0
+… 600 | restored=271 skipped=0 notFound=103 errors=0
+… 800 | restored=441 skipped=0 notFound=133 errors=0
+… 1000 | restored=598 skipped=0 notFound=176 errors=0
+… 1200 | restored=782 skipped=0 notFound=192 errors=0
+… 1400 | restored=978 skipped=0 notFound=196 errors=0
+❌ msgId=1488: request to https://api.telegram.org/bot7682453682:[REDACTED]/forwardMessage failed, reason: read ECONNRESET
+… 1600 | restored=1168 skipped=0 notFound=205 errors=1
+… 1800 | restored=1350 skipped=0 notFound=223 errors=1
+… 2000 | restored=1550 skipped=0 notFound=223 errors=1
+… 2200 | restored=1743 skipped=0 notFound=230 errors=1
+… 2400 | restored=1942 skipped=0 notFound=231 errors=1
+⏳ rate limited at msgId=2458, waiting 1305s…
+
+✅ Done
+   restored=2042 skipped=0 notFound=231 errors=1
+npm notice
+npm notice New minor version of npm available! 11.3.0 -> 11.16.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.16.0
+npm notice To update run: npm install -g npm@11.16.0
+npm notice
