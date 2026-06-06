@@ -17,6 +17,18 @@ function getArchiveChannelId() {
     return normalizeChatId(config.ARCHIVE_CHANNEL_ID || config.LINKS_CHANNEL_ID);
 }
 
+function getPublicPostsChannelId() {
+    return normalizeChatId(
+        config.PUBLIC_POSTS_CHANNEL_ID ||
+            config.ADDITIONAL_CHANNEL_ID
+    );
+}
+
+function getAdminUserId() {
+    const id = config.ADMIN_USER_ID;
+    return id ? String(id).trim() : '';
+}
+
 /**
  * @param {import('telegraf').Context} ctx
  * @returns {{ post: object, chatId: string } | null}
@@ -59,6 +71,8 @@ module.exports = {
     normalizeChatId,
     getPrivateChannelId,
     getArchiveChannelId,
+    getPublicPostsChannelId,
+    getAdminUserId,
     getChannelFilePost,
     isMonitoredChannelChat
 };

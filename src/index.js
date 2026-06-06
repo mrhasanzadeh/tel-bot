@@ -8,6 +8,7 @@ const databaseService = require('./services/databaseService');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
+const scheduleService = require('./services/scheduleService');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -42,6 +43,11 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Set up membership service with bot instance
 membershipService.setTelegram(bot);
+scheduleService.setTelegram(bot);
+
+if (!process.env.ADMIN_USER_ID?.trim()) {
+    console.warn('⚠️ ADMIN_USER_ID is not set — schedule approval flow is disabled');
+}
 
 // Connect to database
 databaseService.connect().catch(error => {

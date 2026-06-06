@@ -71,6 +71,13 @@ cp .env.example .env
 docker compose up -d
 ```
 
+## Schedule posts (TheShioriSub)
+
+1. Run `supabase/schedule_schema.sql` in Supabase SQL editor
+2. `npm run schedule:import-chiramune` — seed Chiramune E01–E13
+3. Set `ADMIN_USER_ID` and `PUBLIC_POSTS_CHANNEL_ID` in `.env`
+4. Upload mkv + zip to archive → admin gets preview → approve to publish new post
+
 ## Bot commands (private chat)
 
 - `/start` — welcome / file or pack from deep link

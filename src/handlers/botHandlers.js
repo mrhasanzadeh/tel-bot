@@ -10,6 +10,7 @@ const {
 } = require('../utils/channelIds');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
+const scheduleService = require('../services/scheduleService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -330,6 +331,17 @@ function setupHandlers(bot) {
             const message = createMembershipMessage(memberships);
             await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(userId) });
         }
+    });
+
+    // Schedule release approval (admin only)
+    bot.action(/^sched_a_(\d+)$/, async (ctx) => {
+        await scheduleService.handleApproval(ctx, Number(ctx.match[1]), 'approve');
+    });
+    bot.action(/^sched_c_(\d+)$/, async (ctx) => {
+        await scheduleService.handleApproval(ctx, Number(ctx.match[1]), 'complete');
+    });
+    bot.action(/^sched_r_(\d+)$/, async (ctx) => {
+        await scheduleService.handleApproval(ctx, Number(ctx.match[1]), 'reject');
     });
 
     // Cancel active pack send via inline button or /cancel

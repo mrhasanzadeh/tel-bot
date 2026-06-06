@@ -8,7 +8,8 @@
     "local": "nodemon src/index.js",
     "dev": "nodemon src/index.js",
     "migrate:mongo": "node src/scripts/migrateMongoToSupabase.js",
-    "migrate:keys": "node src/scripts/migrateFileKeys.js"
+    "migrate:keys": "node src/scripts/migrateFileKeys.js",
+    "schedule:import-chiramune": "node src/scripts/importChiramuneSchedule.js"
   },
   "keywords": [
     "telegram",

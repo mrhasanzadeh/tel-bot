@@ -4,6 +4,7 @@ const { getPrivateChannelId } = require('../utils/channelIds');
 const { generateFileKey, delay, delayCancellable, formatFileSize } = require('../utils/fileUtils');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
+const scheduleService = require('./scheduleService');
 
 /** After pack send finishes, keep files this long (ms). Override: PACK_FILE_DELETE_MS in .env */
 const PACK_FILE_DELETE_MS = config.PACK_FILE_DELETE_MS;
@@ -114,6 +115,10 @@ class FileHandlerService {
         console.log(`✅ File saved to database with key: ${fileKey}`);
 
         await this._updateMessageCaption(ctx, message, fileKey, directLink, storageChannelId);
+
+        scheduleService.onFileRegistered(ctx, fileData).catch((err) => {
+            console.error('❌ Schedule onFileRegistered:', err);
+        });
     }
 
     /**
