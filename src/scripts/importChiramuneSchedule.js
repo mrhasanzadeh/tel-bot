@@ -4,6 +4,11 @@
  * Requires: supabase/schedule_schema.sql applied first.
  */
 require('dotenv').config();
+
+if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 const scheduleDb = require('../services/scheduleDatabaseService');
 
 const CHANNEL_ID = process.env.PUBLIC_POSTS_CHANNEL_ID || process.env.ADDITIONAL_CHANNEL_ID;
