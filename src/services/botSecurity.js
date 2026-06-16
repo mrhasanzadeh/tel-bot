@@ -95,7 +95,7 @@ async function runStartupSecurityChecks(bot) {
 
     console.log('🔒 Security startup');
     console.log(`   bot: @${me.username} (${me.id}) "${me.first_name}"`);
-    console.log(`   membership channels: @${pub}, @${additional}`);
+    console.log(`   membership channels: @${pub}, @${add}`);
 
     const channelWarnings = validateMembershipChannels();
     for (const warning of channelWarnings) {
