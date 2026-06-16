@@ -2,6 +2,7 @@ const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
 const { route: routeChannelFile } = require('../services/channelIntake');
 const { buildChannelStatusReport } = require('../services/channelDiagnostics');
+const { buildSecurityReport, ensurePollingMode } = require('../services/botSecurity');
 const {
     isMonitoredChannelChat,
     getArchiveChannelId,
@@ -225,6 +226,43 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('checkchannels error:', error);
             await ctx.reply('خطا در بررسی کانال‌ها.');
+        }
+    });
+
+    bot.command('security', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+        try {
+            const report = await buildSecurityReport(bot);
+            await ctx.reply(report);
+        } catch (error) {
+            console.error('security error:', error);
+            await ctx.reply('خطا در بررسی امنیت بات.');
+        }
+    });
+
+    bot.command('clearchwebhook', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+        try {
+            const result = await ensurePollingMode(bot);
+            if (result.hadWebhook) {
+                await ctx.reply(
+                    `${e('warning')} webhook حذف شد.\nURL قبلی:\n${result.previousUrl}\n\n` +
+                        'اگر دوباره برگشت، توکن را در @BotFather revoke کنید.'
+                );
+            } else {
+                await ctx.reply(`${e('success')} webhook تنظیم نشده — polling فعال است.`);
+            }
+        } catch (error) {
+            console.error('clearchwebhook error:', error);
+            await ctx.reply('خطا در حذف webhook.');
         }
     });
 

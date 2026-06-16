@@ -8,6 +8,7 @@ const databaseService = require('./services/databaseService');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
+const { runStartupSecurityChecks } = require('./services/botSecurity');
 const scheduleService = require('./services/scheduleService');
 
 // Disable SSL verification for development
@@ -54,6 +55,7 @@ bot.catch((err, ctx) => {
 
 async function start() {
     await databaseService.connect();
+    await runStartupSecurityChecks(bot);
 
     setupHandlers(bot);
 
