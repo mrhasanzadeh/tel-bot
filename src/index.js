@@ -5,7 +5,6 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const databaseService = require('./services/databaseService');
-const { isScheduleDbConfigured } = require('./services/supabaseClient');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
@@ -40,7 +39,11 @@ if (!process.env.LINKS_CHANNEL_ID?.trim()) {
     );
 }
 
-if (!isScheduleDbConfigured()) {
+const scheduleConfigured =
+    Boolean(process.env.SUPABASE_URL?.trim()) &&
+    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
+
+if (!scheduleConfigured) {
     console.warn(
         '⚠️ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — schedule features disabled. ' +
             'File storage uses DATABASE_URL (Postgres).'
