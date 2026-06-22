@@ -2,6 +2,7 @@ require('dotenv').config();
 
 module.exports = {
     BOT_TOKEN: process.env.BOT_TOKEN,
+    DATABASE_URL: process.env.DATABASE_URL,
     SUPABASE_URL: process.env.SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,

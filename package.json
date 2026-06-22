@@ -10,7 +10,8 @@
     "migrate:mongo": "node src/scripts/migrateMongoToSupabase.js",
     "migrate:keys": "node src/scripts/migrateFileKeys.js",
     "reindex:channel": "node src/scripts/reindexPrivateChannel.js",
-    "schedule:import-chiramune": "node src/scripts/importChiramuneSchedule.js"
+    "schedule:import-chiramune": "node src/scripts/importChiramuneSchedule.js",
+    "merge:supabase-to-main": "node src/scripts/mergeSupabaseToMain.js"
   },
   "keywords": [
     "telegram",
@@ -23,6 +24,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "dotenv": "^16.4.5",
+    "pg": "^8.22.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {

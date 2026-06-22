@@ -5,6 +5,7 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const databaseService = require('./services/databaseService');
+const { isScheduleDbConfigured } = require('./services/supabaseClient');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
@@ -19,8 +20,7 @@ if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === 
 // Validate required environment variables
 const requiredEnvVars = [
     'BOT_TOKEN',
-    'SUPABASE_URL',
-    'SUPABASE_SERVICE_ROLE_KEY',
+    'DATABASE_URL',
     'PRIVATE_CHANNEL_ID',
     'PUBLIC_CHANNEL_ID',
     'PUBLIC_CHANNEL_USERNAME',
@@ -37,6 +37,13 @@ if (missingEnvVars.length > 0) {
 if (!process.env.LINKS_CHANNEL_ID?.trim()) {
     console.warn(
         '⚠️ LINKS_CHANNEL_ID is not set — archive uploads will not be copied to PRIVATE_CHANNEL_ID'
+    );
+}
+
+if (!isScheduleDbConfigured()) {
+    console.warn(
+        '⚠️ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — schedule features disabled. ' +
+            'File storage uses DATABASE_URL (Postgres).'
     );
 }
 

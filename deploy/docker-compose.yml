@@ -5,8 +5,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Optional: same network as shiori-postgres (uncomment and set network name)
+    # networks:
+    #   - shiori
     labels:
       - com.centurylinklabs.watchtower.enable=true
+
+# networks:
+#   shiori:
+#     external: true
+#     name: api_default
 
   watchtower:
     # containrrr/watchtower is unmaintained and breaks on Docker Engine 29+ (API >= 1.40)
