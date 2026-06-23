@@ -44,14 +44,22 @@ class DatabaseService {
         };
     }
 
+    _createdAtValue(fileData) {
+        if (fileData?.date != null) {
+            const d = new Date(fileData.date);
+            if (!Number.isNaN(d.getTime())) return d;
+        }
+        return new Date();
+    }
+
     async createFile(fileData) {
         await this._ensureConnection();
 
         const { rows } = await pg.query(
             `INSERT INTO files (
                 key, message_id, type, file_id, file_name, file_size, caption,
-                downloads, last_accessed, is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                downloads, last_accessed, is_active, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *`,
             [
                 fileData.key,
@@ -64,6 +72,7 @@ class DatabaseService {
                 fileData.downloads ?? 0,
                 fileData.lastAccessed ?? null,
                 fileData.isActive !== false,
+                this._createdAtValue(fileData),
             ]
         );
 
@@ -76,8 +85,8 @@ class DatabaseService {
 
         const { rows } = await pg.query(
             `INSERT INTO files (
-                key, message_id, type, file_id, file_name, file_size, caption, is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+                key, message_id, type, file_id, file_name, file_size, caption, is_active, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
             ON CONFLICT (key) DO UPDATE SET
                 message_id = EXCLUDED.message_id,
                 type = EXCLUDED.type,
@@ -95,6 +104,7 @@ class DatabaseService {
                 fileData.fileName ?? null,
                 fileData.fileSize ?? null,
                 fileData.caption ?? null,
+                this._createdAtValue(fileData),
             ]
         );
 
