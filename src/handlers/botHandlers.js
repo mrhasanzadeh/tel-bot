@@ -242,21 +242,27 @@ function setupHandlers(bot) {
             .split(/\s+/);
         const action = (parts[1] || 'status').toLowerCase();
 
+        const statusWord = (enabled) => (enabled ? 'فعال' : 'غیرفعال');
+
         try {
             if (action === 'on' || action === 'enable') {
                 await archiveMirrorService.setEnabled(true);
-                await ctx.reply(
-                    `${e('success')} کپی خودکار آرشیو → کانال لینک فعال شد.\n` +
-                        'پست‌های جدید در کانال آرشیو دوباره کپی می‌شوند.'
+                await botReply.reply(
+                    ctx,
+                    `${e('success')} <b>کپی خودکار فعال شد</b>\n\n` +
+                        `${e('download')} فایل‌های جدید کانال <b>آرشیو</b> دوباره به کانال <b>لینک</b> کپی می‌شوند.\n` +
+                        `${e('check')} برای بررسی وضعیت: <code>/mirroring status</code>`
                 );
                 return;
             }
 
             if (action === 'off' || action === 'disable') {
                 await archiveMirrorService.setEnabled(false);
-                await ctx.reply(
-                    `${e('success')} کپی خودکار آرشیو → کانال لینک غیرفعال شد.\n` +
-                        'فایل‌های جدید در کانال آرشیو کپی نمی‌شوند (پست مستقیم در کانال لینک همچنان ثبت می‌شود).'
+                await botReply.reply(
+                    ctx,
+                    `${e('stop')} <b>کپی خودکار غیرفعال شد</b>\n\n` +
+                        `${e('info')} پست‌های کانال آرشیو دیگر کپی نمی‌شوند.\n` +
+                        `${e('check')} پست <b>مستقیم</b> در کانال لینک همچنان ثبت می‌شود.`
                 );
                 return;
             }
@@ -264,36 +270,44 @@ function setupHandlers(bot) {
             if (action === 'reset') {
                 await archiveMirrorService.resetToEnvDefault();
                 const status = await archiveMirrorService.getStatus();
-                await ctx.reply(
-                    `${e('success')} تنظیم ادمین پاک شد.\n` +
-                        `وضعیت فعلی: ${status.enabled ? 'فعال' : 'غیرفعال'} (از .env)\n` +
-                        `پیش‌فرض env: ${status.envDefault ? 'فعال' : 'غیرفعال'}`
+                await botReply.reply(
+                    ctx,
+                    `${e('success')} <b>تنظیم ادمین بازنشانی شد</b>\n\n` +
+                        `${e('clipboard')} وضعیت فعلی: <b>${statusWord(status.enabled)}</b> (از .env)\n` +
+                        `${e('info')} پیش‌فرض .env: <b>${statusWord(status.envDefault)}</b>`
                 );
                 return;
             }
 
             if (action !== 'status') {
-                await ctx.reply(
-                    'استفاده:\n' +
-                        '/mirroring status — وضعیت\n' +
-                        '/mirroring on — فعال\n' +
-                        '/mirroring off — غیرفعال\n' +
-                        '/mirroring reset — برگشت به مقدار .env'
+                await botReply.reply(
+                    ctx,
+                    `${e('clipboard')} <b>راهنمای mirroring</b>\n\n` +
+                        `<code>/mirroring status</code> — ${e('search')} وضعیت فعلی\n` +
+                        `<code>/mirroring on</code> — ${e('success')} فعال‌سازی کپی\n` +
+                        `<code>/mirroring off</code> — ${e('stop')} غیرفعال‌سازی کپی\n` +
+                        `<code>/mirroring reset</code> — ${e('cool')} بازگشت به .env`
                 );
                 return;
             }
 
             const status = await archiveMirrorService.getStatus();
-            const sourceLabel = status.source === 'admin' ? 'تنظیم ادمین (/mirroring)' : 'فایل .env';
-            await ctx.reply(
-                `${e('info')} آرشیو → کانال لینک\n\n` +
-                    `وضعیت: ${status.enabled ? 'فعال ✅' : 'غیرفعال ⏸️'}\n` +
+            const sourceLabel =
+                status.source === 'admin'
+                    ? `${e('bot')} تنظیم ادمین`
+                    : `${e('clipboard')} فایل .env`;
+
+            await botReply.reply(
+                ctx,
+                `${e('download')} <b>کپی آرشیو → کانال لینک</b>\n\n` +
+                    `${e('info')} وضعیت: <b>${statusWord(status.enabled)}</b>\n` +
                     `منبع فعلی: ${sourceLabel}\n` +
-                    `پیش‌فرض .env: ${status.envDefault ? 'فعال' : 'غیرفعال'}`
+                    `${e('timer')} پیش‌فرض .env: <b>${statusWord(status.envDefault)}</b>\n\n` +
+                    `${e('megaphone')} <code>/mirroring off</code> · <code>/mirroring on</code>`
             );
         } catch (error) {
             console.error('mirroring command error:', error);
-            await ctx.reply(`${e('error')} خطا در تغییر وضعیت mirroring.`);
+            await botReply.reply(ctx, `${e('error')} خطا در تغییر وضعیت mirroring.`);
         }
     });
 
