@@ -13,6 +13,7 @@ const {
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 const scheduleService = require('../services/scheduleService');
+const archiveMirrorService = require('../services/archiveMirrorService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -226,6 +227,73 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('checkchannels error:', error);
             await ctx.reply('خطا در بررسی کانال‌ها.');
+        }
+    });
+
+    bot.command('mirroring', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+
+        const parts = String(ctx.message?.text ?? '')
+            .trim()
+            .split(/\s+/);
+        const action = (parts[1] || 'status').toLowerCase();
+
+        try {
+            if (action === 'on' || action === 'enable') {
+                await archiveMirrorService.setEnabled(true);
+                await ctx.reply(
+                    `${e('success')} کپی خودکار آرشیو → کانال لینک فعال شد.\n` +
+                        'پست‌های جدید در کانال آرشیو دوباره کپی می‌شوند.'
+                );
+                return;
+            }
+
+            if (action === 'off' || action === 'disable') {
+                await archiveMirrorService.setEnabled(false);
+                await ctx.reply(
+                    `${e('success')} کپی خودکار آرشیو → کانال لینک غیرفعال شد.\n` +
+                        'فایل‌های جدید در کانال آرشیو کپی نمی‌شوند (پست مستقیم در کانال لینک همچنان ثبت می‌شود).'
+                );
+                return;
+            }
+
+            if (action === 'reset') {
+                await archiveMirrorService.resetToEnvDefault();
+                const status = await archiveMirrorService.getStatus();
+                await ctx.reply(
+                    `${e('success')} تنظیم ادمین پاک شد.\n` +
+                        `وضعیت فعلی: ${status.enabled ? 'فعال' : 'غیرفعال'} (از .env)\n` +
+                        `پیش‌فرض env: ${status.envDefault ? 'فعال' : 'غیرفعال'}`
+                );
+                return;
+            }
+
+            if (action !== 'status') {
+                await ctx.reply(
+                    'استفاده:\n' +
+                        '/mirroring status — وضعیت\n' +
+                        '/mirroring on — فعال\n' +
+                        '/mirroring off — غیرفعال\n' +
+                        '/mirroring reset — برگشت به مقدار .env'
+                );
+                return;
+            }
+
+            const status = await archiveMirrorService.getStatus();
+            const sourceLabel = status.source === 'admin' ? 'تنظیم ادمین (/mirroring)' : 'فایل .env';
+            await ctx.reply(
+                `${e('info')} آرشیو → کانال لینک\n\n` +
+                    `وضعیت: ${status.enabled ? 'فعال ✅' : 'غیرفعال ⏸️'}\n` +
+                    `منبع فعلی: ${sourceLabel}\n` +
+                    `پیش‌فرض .env: ${status.envDefault ? 'فعال' : 'غیرفعال'}`
+            );
+        } catch (error) {
+            console.error('mirroring command error:', error);
+            await ctx.reply(`${e('error')} خطا در تغییر وضعیت mirroring.`);
         }
     });
 

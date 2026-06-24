@@ -8,6 +8,7 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 - Unique file keys and direct `t.me` links
 - File packs with cancellable batch send
 - Archive channel upload → copy to private links channel (no forward label)
+- Toggle archive mirroring via `/mirroring` (admin) or `ARCHIVE_MIRROR_ENABLED` in `.env`
 - Premium custom emoji support (optional)
 - Docker + GHCR deploy with Watchtower
 
@@ -49,8 +50,9 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 1. `npm install`
 2. Copy `deploy/.env.example` → `deploy/.env` and fill values
 3. Apply `scripts/sql/bot_files_columns.sql` on main Postgres (if not done during merge)
-4. For schedule: run SQL in Supabase (`supabase/schedule_schema.sql`, …)
-5. `npm install && npm start`
+4. Apply `supabase/bot_settings_schema.sql` on main Postgres (runtime toggles for `/mirroring`)
+5. For schedule: run SQL in Supabase (`supabase/schedule_schema.sql`, …)
+6. `npm install && npm start`
 
 ### Main env vars
 
@@ -61,6 +63,7 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | **Optional** — schedule features only |
 | `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
 | `LINKS_CHANNEL_ID` | Archive upload channel (copied into private) |
+| `ARCHIVE_MIRROR_ENABLED` | Default archive → private copy on boot (`true`/`false`; override with `/mirroring`) |
 | `PUBLIC_*` / `ADDITIONAL_*` | Membership channels |
 | `PACK_FILE_DELETE_MS` | Pack file auto-delete delay (default `120000`) |
 

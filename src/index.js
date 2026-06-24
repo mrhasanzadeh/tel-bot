@@ -10,6 +10,7 @@ const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
 const { runStartupSecurityChecks } = require('./services/botSecurity');
 const scheduleService = require('./services/scheduleService');
+const archiveMirrorService = require('./services/archiveMirrorService');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -65,6 +66,11 @@ bot.catch((err, ctx) => {
 
 async function start() {
     await databaseService.connect();
+    await archiveMirrorService.init();
+    const mirrorStatus = await archiveMirrorService.getStatus();
+    console.log(
+        `📋 Archive mirror: ${mirrorStatus.enabled ? 'ON' : 'OFF'} (source=${mirrorStatus.source}, env default=${mirrorStatus.envDefault ? 'ON' : 'OFF'})`
+    );
     await runStartupSecurityChecks(bot);
 
     setupHandlers(bot);

@@ -3,6 +3,7 @@ const {
     getPrivateChannelId,
     getChannelFilePost
 } = require('../utils/channelIds');
+const archiveMirrorService = require('./archiveMirrorService');
 
 /**
  * Route file posts from archive or private channels.
@@ -23,6 +24,13 @@ async function route(ctx, fileHandlerService) {
     ctx.channelPost = post;
 
     if (archiveId && chatId === archiveId) {
+        const mirrorEnabled = await archiveMirrorService.isEnabled();
+        if (!mirrorEnabled) {
+            console.log(
+                `⏸️ Archive mirror disabled — skipped copy chat=${chatId} msg=${post.message_id}`
+            );
+            return true;
+        }
         console.log(`📥 Archive file post chat=${chatId} msg=${post.message_id}`);
         await fileHandlerService.handleArchiveChannelPost(ctx);
         return true;
