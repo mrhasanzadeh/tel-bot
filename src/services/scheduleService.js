@@ -1,5 +1,16 @@
 const config = require('../../config');
-const scheduleDb = require('./scheduleDatabaseService');
+
+let _scheduleDb = null;
+function getScheduleDb() {
+    if (process.env.SHIORI_API_URL?.trim()) {
+        throw new Error('Schedule module requires direct Postgres (disabled when SHIORI_API_URL is set)');
+    }
+    if (!_scheduleDb) {
+        _scheduleDb = require('./scheduleDatabaseService');
+    }
+    return _scheduleDb;
+}
+
 const {
     parseAnimeFilename,
     normalizeFilenameTitle
@@ -66,7 +77,7 @@ class ScheduleService {
      * @param {string} botUsername
      */
     async _buildOngoingCaption(anime, pending, botUsername) {
-        const episodes = await scheduleDb.listEpisodes(anime.id);
+        const episodes = await getScheduleDb().listEpisodes(anime.id);
         const episodeMap = new Map(episodes.map((ep) => [ep.episode, ep]));
         episodeMap.set(pending.episode, {
             episode: pending.episode,
@@ -132,7 +143,7 @@ class ScheduleService {
      * @param {string} botUsername
      */
     async _buildCompletedCaption(anime, pending, botUsername) {
-        const existingEpisodes = await scheduleDb.listEpisodes(anime.id);
+        const existingEpisodes = await getScheduleDb().listEpisodes(anime.id);
         const episodeMap = new Map(existingEpisodes.map((ep) => [ep.episode, ep]));
         episodeMap.set(pending.episode, {
             episode: pending.episode,
@@ -184,13 +195,13 @@ class ScheduleService {
         const parsed = parseAnimeFilename(fileData.fileName);
         if (!parsed) return;
 
-        const anime = await scheduleDb.findAnimeByFilenameTitle(parsed.title);
+        const anime = await getScheduleDb().findAnimeByFilenameTitle(parsed.title);
         if (!anime) {
             await this._handleUnregisteredAnime(ctx, parsed, fileData);
             return;
         }
 
-        const batch = await scheduleDb.upsertUploadBatch(
+        const batch = await getScheduleDb().upsertUploadBatch(
             anime.id,
             parsed.episode,
             parsed.kind,
@@ -231,7 +242,7 @@ class ScheduleService {
         }
 
         const filenameTitle = normalizeFilenameTitle(parsed.title);
-        const reg = await scheduleDb.upsertAnimeRegistration(
+        const reg = await getScheduleDb().upsertAnimeRegistration(
             filenameTitle,
             parsed.title.trim(),
             parsed.kind,
@@ -251,7 +262,7 @@ class ScheduleService {
             reg.video_key &&
             reg.subtitle_key
         ) {
-            const updated = await scheduleDb.updateAnimeRegistration(filenameTitle, {
+            const updated = await getScheduleDb().updateAnimeRegistration(filenameTitle, {
                 registration_step: 'cover_photo'
             });
             await this._askRegistrationCoverPhoto(ctx, updated);
@@ -266,7 +277,7 @@ class ScheduleService {
         const adminId = getAdminUserId();
         if (!adminId) return;
 
-        await scheduleDb.markAnimeRegistrationAsked(filenameTitle);
+        await getScheduleDb().markAnimeRegistrationAsked(filenameTitle);
         await ctx.telegram.sendMessage(
             adminId,
             `${e('clipboard')} <b>انیمه جدید شناسایی شد</b>\n\n` +
@@ -372,7 +383,7 @@ class ScheduleService {
     async _continueRegistrationAfterKaraoke(ctx, reg) {
         const packOnly = reg.subtitle_mode === 'pack_only';
         if (!packOnly && !reg.subtitle_key) {
-            await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 registration_step: 'awaiting_e01_sub'
             });
             await ctx.reply(
@@ -383,10 +394,10 @@ class ScheduleService {
             return;
         }
 
-        await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+        await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
             registration_step: 'cover_photo'
         });
-        const fresh = await scheduleDb.getAnimeRegistration(reg.filename_title);
+        const fresh = await getScheduleDb().getAnimeRegistration(reg.filename_title);
         await this._askRegistrationCoverPhoto(ctx, fresh);
     }
 
@@ -437,7 +448,7 @@ class ScheduleService {
 
         let slug = slugFromRomaji(reg.romaji_display);
         if (!slug) slug = `anime-${Date.now()}`;
-        const existingSlug = await scheduleDb.getAnimeBySlug(slug);
+        const existingSlug = await getScheduleDb().getAnimeBySlug(slug);
         if (existingSlug) slug = `${slug}-${Date.now()}`;
 
         const subtitleMode = reg.subtitle_mode === 'pack_only' ? 'pack_only' : 'per_episode';
@@ -451,7 +462,7 @@ class ScheduleService {
             return;
         }
 
-        const anime = await scheduleDb.upsertAnime({
+        const anime = await getScheduleDb().upsertAnime({
             slug,
             title: reg.english_title,
             filenameTitle: reg.filename_title,
@@ -467,10 +478,10 @@ class ScheduleService {
             channelId: String(channelId)
         });
 
-        await scheduleDb.deleteAnimeRegistration(reg.filename_title);
-        await scheduleDb.upsertUploadBatch(anime.id, 1, 'video', reg.video_key);
+        await getScheduleDb().deleteAnimeRegistration(reg.filename_title);
+        await getScheduleDb().upsertUploadBatch(anime.id, 1, 'video', reg.video_key);
         if (!packOnly && reg.subtitle_key) {
-            await scheduleDb.upsertUploadBatch(anime.id, 1, 'subtitle', reg.subtitle_key);
+            await getScheduleDb().upsertUploadBatch(anime.id, 1, 'subtitle', reg.subtitle_key);
         }
 
         const synopsisLine = reg.synopsis_url
@@ -522,7 +533,7 @@ class ScheduleService {
         const text = ctx.message?.text?.trim();
         if (!text || text.startsWith('/')) return false;
 
-        const reg = await scheduleDb.findActiveAnimeRegistration();
+        const reg = await getScheduleDb().findActiveAnimeRegistration();
         if (!reg?.video_key) return false;
 
         const step = reg.registration_step || 'english';
@@ -554,7 +565,7 @@ class ScheduleService {
                 return true;
             }
 
-            const updated = await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            const updated = await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 staff,
                 registration_step: 'karaoke'
             });
@@ -583,7 +594,7 @@ class ScheduleService {
             if (text.length > 200) return false;
             if (parsePackEpisodesSlug(text) || parsePackSubtitleKey(text)) return false;
 
-            const updated = await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            const updated = await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 english_title: text,
                 registration_step: 'synopsis'
             });
@@ -606,7 +617,7 @@ class ScheduleService {
                 return true;
             }
 
-            const updated = await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            const updated = await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 synopsis_url: synopsisUrl,
                 registration_step: 'hashtag'
             });
@@ -626,7 +637,7 @@ class ScheduleService {
                 return true;
             }
 
-            const updated = await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            const updated = await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 hashtag,
                 registration_step: 'subtitle_mode'
             });
@@ -650,7 +661,7 @@ class ScheduleService {
         }
 
         const filenameTitle = this._regCbDecode(String(ctx.match[1]));
-        const reg = await scheduleDb.getAnimeRegistration(filenameTitle);
+        const reg = await getScheduleDb().getAnimeRegistration(filenameTitle);
         if (!reg?.video_key || reg.registration_step !== 'synopsis') {
             await ctx.answerCbQuery('این ثبت‌نام دیگر فعال نیست.');
             return;
@@ -659,14 +670,14 @@ class ScheduleService {
         await ctx.answerCbQuery(hasSynopsis ? 'بله' : 'نه');
 
         if (hasSynopsis) {
-            await scheduleDb.updateAnimeRegistration(filenameTitle, {
+            await getScheduleDb().updateAnimeRegistration(filenameTitle, {
                 registration_step: 'synopsis_link'
             });
             await this._askSynopsisLink(ctx);
             return;
         }
 
-        const updated = await scheduleDb.updateAnimeRegistration(filenameTitle, {
+        const updated = await getScheduleDb().updateAnimeRegistration(filenameTitle, {
             synopsis_url: null,
             registration_step: 'hashtag'
         });
@@ -688,7 +699,7 @@ class ScheduleService {
         }
 
         const filenameTitle = this._regCbDecode(String(ctx.match[1]));
-        const reg = await scheduleDb.getAnimeRegistration(filenameTitle);
+        const reg = await getScheduleDb().getAnimeRegistration(filenameTitle);
         if (!reg?.video_key || reg.registration_step !== 'subtitle_mode') {
             await ctx.answerCbQuery('این ثبت‌نام دیگر فعال نیست.');
             return;
@@ -697,7 +708,7 @@ class ScheduleService {
         const packOnly = mode === 'pack_only';
         await ctx.answerCbQuery(packOnly ? 'فقط پک' : 'هر قسمت جدا');
 
-        const updated = await scheduleDb.updateAnimeRegistration(filenameTitle, {
+        const updated = await getScheduleDb().updateAnimeRegistration(filenameTitle, {
             subtitle_mode: packOnly ? 'pack_only' : 'per_episode',
             registration_step: 'staff'
         });
@@ -718,7 +729,7 @@ class ScheduleService {
         }
 
         const filenameTitle = this._regCbDecode(String(ctx.match[1]));
-        const reg = await scheduleDb.getAnimeRegistration(filenameTitle);
+        const reg = await getScheduleDb().getAnimeRegistration(filenameTitle);
         if (!reg?.video_key || !reg.staff || reg.registration_step !== 'karaoke') {
             await ctx.answerCbQuery('این ثبت‌نام دیگر فعال نیست.');
             return;
@@ -726,8 +737,8 @@ class ScheduleService {
 
         await ctx.answerCbQuery(hasKaraoke ? 'بله' : 'نه');
 
-        await scheduleDb.updateAnimeRegistration(filenameTitle, { has_karaoke: hasKaraoke });
-        const updated = await scheduleDb.getAnimeRegistration(filenameTitle);
+        await getScheduleDb().updateAnimeRegistration(filenameTitle, { has_karaoke: hasKaraoke });
+        const updated = await getScheduleDb().getAnimeRegistration(filenameTitle);
         await this._continueRegistrationAfterKaraoke(ctx, updated);
     }
 
@@ -738,7 +749,7 @@ class ScheduleService {
      * @param {object} anime
      */
     async _tryProposeNextInQueue(ctx, anime) {
-        const active = await scheduleDb.findAnyActivePendingRelease(anime.id);
+        const active = await getScheduleDb().findAnyActivePendingRelease(anime.id);
         if (active) {
             console.log(
                 `📋 Schedule: awaiting admin on E${String(active.episode).padStart(2, '0')} ` +
@@ -748,11 +759,11 @@ class ScheduleService {
         }
 
         const packOnly = this._isPackOnlySubtitles(anime);
-        const nextEpisode = (await scheduleDb.getMaxPublishedEpisode(anime.id)) + 1;
-        const batch = await scheduleDb.getReadyBatch(anime.id, nextEpisode, packOnly);
+        const nextEpisode = (await getScheduleDb().getMaxPublishedEpisode(anime.id)) + 1;
+        const batch = await getScheduleDb().getReadyBatch(anime.id, nextEpisode, packOnly);
 
         if (!batch) {
-            const waiting = await scheduleDb.countReadyBatchesAfter(anime.id, nextEpisode, packOnly);
+            const waiting = await getScheduleDb().countReadyBatchesAfter(anime.id, nextEpisode, packOnly);
             if (waiting > 0) {
                 console.log(
                     `📋 Schedule: ${waiting} later episode(s) ready but waiting for ` +
@@ -771,8 +782,8 @@ class ScheduleService {
             false
         );
         if (previewSent) {
-            await scheduleDb.markBatchDone(anime.id, nextEpisode);
-            const queued = await scheduleDb.countReadyBatchesAfter(anime.id, nextEpisode, packOnly);
+            await getScheduleDb().markBatchDone(anime.id, nextEpisode);
+            const queued = await getScheduleDb().countReadyBatchesAfter(anime.id, nextEpisode, packOnly);
             if (queued > 0) {
                 console.log(`📋 Schedule: ${queued} more episode(s) queued after publish`);
             }
@@ -810,7 +821,7 @@ class ScheduleService {
         const needsCoverPhoto =
             this._animeNeedsCoverPhoto(anime) && !anime.coverPhotoFileId;
 
-        const pending = await scheduleDb.createPendingRelease({
+        const pending = await getScheduleDb().createPendingRelease({
             animeId: anime.id,
             episode,
             videoKey,
@@ -821,7 +832,7 @@ class ScheduleService {
         });
 
         if (anime.coverPhotoFileId) {
-            await scheduleDb.updatePending(pending.id, {
+            await getScheduleDb().updatePending(pending.id, {
                 coverPhotoFileId: anime.coverPhotoFileId
             });
         }
@@ -879,7 +890,7 @@ class ScheduleService {
             reply_markup: this._previewKeyboard(pending.id, false)
         });
 
-        await scheduleDb.updatePending(pending.id, {
+        await getScheduleDb().updatePending(pending.id, {
             adminPreviewChatId: sent.chat.id,
             adminPreviewMessageId: sent.message_id
         });
@@ -899,9 +910,9 @@ class ScheduleService {
         const fileId = this._extractPhotoFileId(ctx.message);
         if (!fileId) return false;
 
-        const reg = await scheduleDb.findActiveAnimeRegistration();
+        const reg = await getScheduleDb().findActiveAnimeRegistration();
         if (reg?.registration_step === 'cover_photo') {
-            const updated = await scheduleDb.updateAnimeRegistration(reg.filename_title, {
+            const updated = await getScheduleDb().updateAnimeRegistration(reg.filename_title, {
                 cover_photo_file_id: fileId,
                 registration_step: 'done'
             });
@@ -909,7 +920,7 @@ class ScheduleService {
             return true;
         }
 
-        const pending = await scheduleDb.findPendingAwaitingCover();
+        const pending = await getScheduleDb().findPendingAwaitingCover();
         if (!pending) {
             await ctx.reply(
                 `${e('info')} پیش‌نمایشی در انتظار عکس نیست.`,
@@ -918,12 +929,12 @@ class ScheduleService {
             return true;
         }
 
-        const anime = await scheduleDb.getAnimeById(pending.animeId);
-        await scheduleDb.updatePending(pending.id, { coverPhotoFileId: fileId });
-        await scheduleDb.updateAnimeCoverPhoto(pending.animeId, fileId);
+        const anime = await getScheduleDb().getAnimeById(pending.animeId);
+        await getScheduleDb().updatePending(pending.id, { coverPhotoFileId: fileId });
+        await getScheduleDb().updateAnimeCoverPhoto(pending.animeId, fileId);
 
         if (!pending.adminPreviewMessageId) {
-            const fresh = await scheduleDb.getPendingById(pending.id);
+            const fresh = await getScheduleDb().getPendingById(pending.id);
             const completed = fresh.markCompleted || anime?.status === 'completed';
             await ctx.reply(
                 `${e('success')} عکس پست ثبت شد — در حال ساخت پیش‌نمایش…`,
@@ -955,10 +966,10 @@ class ScheduleService {
         const text = ctx.message?.text?.trim();
         if (!text) return false;
 
-        const pending = await scheduleDb.findPendingAwaitingPack();
+        const pending = await getScheduleDb().findPendingAwaitingPack();
         if (!pending) return false;
 
-        const anime = await scheduleDb.getAnimeById(pending.animeId);
+        const anime = await getScheduleDb().getAnimeById(pending.animeId);
         const packs = this._resolvePacks(pending, anime);
         const patch = {};
 
@@ -990,7 +1001,7 @@ class ScheduleService {
             return false;
         }
 
-        const updated = await scheduleDb.updatePending(pending.id, patch);
+        const updated = await getScheduleDb().updatePending(pending.id, patch);
         const merged = { ...pending, ...updated };
         const resolved = this._resolvePacks(merged, anime);
 
@@ -1023,11 +1034,11 @@ class ScheduleService {
             return true;
         }
 
-        await scheduleDb.updatePending(pending.id, {
+        await getScheduleDb().updatePending(pending.id, {
             proposedCaption: caption,
             needsPackInfo: false
         });
-        await scheduleDb.updateAnimePacks(
+        await getScheduleDb().updateAnimePacks(
             anime.id,
             resolved.packEpisodesSlug,
             resolved.packSubtitleKey
@@ -1048,7 +1059,7 @@ class ScheduleService {
         if (!packs.packEpisodesSlug) missing.push('پک قسمت‌ها');
         if (!packs.packSubtitleKey) missing.push('پک زیرنویس');
 
-        await scheduleDb.updatePending(pendingId, {
+        await getScheduleDb().updatePending(pendingId, {
             markCompleted: true,
             needsPackInfo: true
         });
@@ -1086,7 +1097,7 @@ class ScheduleService {
             return;
         }
 
-        const pending = await scheduleDb.getPendingById(pendingId);
+        const pending = await getScheduleDb().getPendingById(pendingId);
         if (!pending || pending.status !== 'pending') {
             await ctx.answerCbQuery('این درخواست دیگر فعال نیست.', { show_alert: true });
             return;
@@ -1099,13 +1110,13 @@ class ScheduleService {
                 });
                 return;
             }
-            await scheduleDb.updatePending(pendingId, { status: 'rejected' });
+            await getScheduleDb().updatePending(pendingId, { status: 'rejected' });
             await ctx.answerCbQuery('رد شد.');
             await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
             return;
         }
 
-        const anime = await scheduleDb.getAnimeById(pending.animeId);
+        const anime = await getScheduleDb().getAnimeById(pending.animeId);
         let markCompleted = pending.markCompleted;
 
         if (action === 'complete') {
@@ -1118,7 +1129,7 @@ class ScheduleService {
                     await ctx.answerCbQuery('متن با پک‌ها خیلی بلند است.', { show_alert: true });
                     return;
                 }
-                await scheduleDb.updatePending(pendingId, { proposedCaption: caption });
+                await getScheduleDb().updatePending(pendingId, { proposedCaption: caption });
                 pending.proposedCaption = caption;
                 await this._requestPackInfo(ctx, anime, pending, pendingId);
                 pending.markCompleted = true;
@@ -1132,7 +1143,7 @@ class ScheduleService {
                 return;
             }
 
-            await scheduleDb.updatePending(pendingId, {
+            await getScheduleDb().updatePending(pendingId, {
                 markCompleted: true,
                 proposedCaption: caption,
                 needsPackInfo: false
@@ -1142,7 +1153,7 @@ class ScheduleService {
             pending.needsPackInfo = false;
         }
 
-        const claimed = await scheduleDb.claimPendingRelease(pendingId);
+        const claimed = await getScheduleDb().claimPendingRelease(pendingId);
         if (!claimed) {
             await ctx.answerCbQuery('این درخواست در حال پردازش یا قبلاً منتشر شده.', { show_alert: true });
             return;
@@ -1152,13 +1163,13 @@ class ScheduleService {
 
         try {
             const publishedId = await this._publish(claimed);
-            await scheduleDb.updatePending(pendingId, {
+            await getScheduleDb().updatePending(pendingId, {
                 status: 'published',
                 publishedMessageId: publishedId
             });
             await ctx.editMessageReplyMarkup(this._previewKeyboard(pendingId, true));
-            const channelId = this._getScheduleChannelId(await scheduleDb.getAnimeById(claimed.animeId));
-            const anime = await scheduleDb.getAnimeById(claimed.animeId);
+            const channelId = this._getScheduleChannelId(await getScheduleDb().getAnimeById(claimed.animeId));
+            const anime = await getScheduleDb().getAnimeById(claimed.animeId);
             const channelLabel = isScheduleTestMode() ? 'کانال تست' : 'TheShioriSub';
             await ctx.reply(
                 `${e('success')} پست در <b>${channelLabel}</b> منتشر شد.\n` +
@@ -1168,7 +1179,7 @@ class ScheduleService {
             await this._tryProposeNextInQueue(ctx, anime);
         } catch (error) {
             console.error('❌ Schedule publish failed:', error);
-            await scheduleDb.releasePendingClaim(pendingId);
+            await getScheduleDb().releasePendingClaim(pendingId);
             await ctx.reply(`${e('error')} خطا در انتشار: ${error.message}`, htmlOpts());
         }
     }
@@ -1185,7 +1196,7 @@ class ScheduleService {
             return;
         }
 
-        const pending = await scheduleDb.getPendingById(pendingId);
+        const pending = await getScheduleDb().getPendingById(pendingId);
         if (!pending || pending.status !== 'published') {
             await ctx.answerCbQuery('انتشار مجدد فقط برای پست‌های منتشرشده ممکن است.', {
                 show_alert: true
@@ -1197,9 +1208,9 @@ class ScheduleService {
 
         try {
             const publishedId = await this._publish(pending);
-            await scheduleDb.updatePending(pendingId, { publishedMessageId: publishedId });
+            await getScheduleDb().updatePending(pendingId, { publishedMessageId: publishedId });
             const channelId = this._getScheduleChannelId(
-                await scheduleDb.getAnimeById(pending.animeId)
+                await getScheduleDb().getAnimeById(pending.animeId)
             );
             const channelLabel = isScheduleTestMode() ? 'کانال تست' : 'TheShioriSub';
             await ctx.reply(
@@ -1218,7 +1229,7 @@ class ScheduleService {
      * @returns {Promise<number>}
      */
     async _publish(pending) {
-        const anime = await scheduleDb.getAnimeById(pending.animeId);
+        const anime = await getScheduleDb().getAnimeById(pending.animeId);
         const channelId = this._getScheduleChannelId(anime);
         const sourceMessageId =
             anime.latestScheduleMessageId || anime.templateMessageId;
@@ -1255,7 +1266,7 @@ class ScheduleService {
             newMessageId = sent.message_id;
 
             if (!anime.coverPhotoFileId) {
-                await scheduleDb.updateAnimeCoverPhoto(anime.id, photoFileId);
+                await getScheduleDb().updateAnimeCoverPhoto(anime.id, photoFileId);
             }
         } else if (sourceMessageId) {
             console.log(
@@ -1301,14 +1312,14 @@ class ScheduleService {
             throw new Error('عکس پست تنظیم نشده — ابتدا عکس را برای بات بفرستید');
         }
 
-        await scheduleDb.upsertEpisode(
+        await getScheduleDb().upsertEpisode(
             anime.id,
             pending.episode,
             pending.videoKey,
             pending.subtitleKey
         );
 
-        await scheduleDb.updateAnimeScheduleMessage(
+        await getScheduleDb().updateAnimeScheduleMessage(
             anime.id,
             newMessageId,
             pending.markCompleted ? 'completed' : null
@@ -1317,7 +1328,7 @@ class ScheduleService {
         if (pending.markCompleted) {
             const packs = this._resolvePacks(pending, anime);
             if (packs.packEpisodesSlug && packs.packSubtitleKey) {
-                await scheduleDb.updateAnimePacks(
+                await getScheduleDb().updateAnimePacks(
                     anime.id,
                     packs.packEpisodesSlug,
                     packs.packSubtitleKey
