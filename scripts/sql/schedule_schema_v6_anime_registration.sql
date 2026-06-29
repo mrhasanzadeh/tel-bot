@@ -1,4 +1,4 @@
--- Run once in Supabase SQL editor (after schedule_schema.sql)
+-- Run once in Postgres (psql) (after schedule_schema.sql)
 
 CREATE TABLE IF NOT EXISTS anime_registration_pending (
     filename_title TEXT PRIMARY KEY,

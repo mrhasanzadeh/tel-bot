@@ -40,17 +40,6 @@ if (!process.env.LINKS_CHANNEL_ID?.trim()) {
     );
 }
 
-const scheduleConfigured =
-    Boolean(process.env.SUPABASE_URL?.trim()) &&
-    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
-
-if (!scheduleConfigured) {
-    console.warn(
-        '⚠️ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — schedule features disabled. ' +
-            'File storage uses DATABASE_URL (Postgres).'
-    );
-}
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 membershipService.setTelegram(bot);
@@ -65,6 +54,7 @@ bot.catch((err, ctx) => {
 });
 
 async function start() {
+    console.log('🔄 Connecting to Postgres...');
     await databaseService.connect();
     await archiveMirrorService.init();
     const mirrorStatus = await archiveMirrorService.getStatus();

@@ -1,4 +1,4 @@
--- Run once in Supabase SQL editor (after v6 anime_registration)
+-- Run once in Postgres (psql) (after v6 anime_registration)
 
 ALTER TABLE anime_registration_pending
     ADD COLUMN IF NOT EXISTS registration_step TEXT,

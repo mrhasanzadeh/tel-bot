@@ -1,4 +1,4 @@
--- Run once in Supabase SQL editor (after v8)
+-- Run once in Postgres (psql) (after v8)
 
 ALTER TABLE anime_posts
     ADD COLUMN IF NOT EXISTS has_karaoke BOOLEAN NOT NULL DEFAULT false;

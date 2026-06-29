@@ -1,4 +1,4 @@
-const supabase = require('./supabaseClient');
+const pg = require('./postgresClient');
 const { normalizeFilenameTitle } = require('../utils/animeFilenameParser');
 
 function mapAnime(row) {
@@ -59,110 +59,115 @@ function mapPending(row) {
     };
 }
 
+async function one(sql, params = []) {
+    const { rows } = await pg.query(sql, params);
+    return rows[0] ?? null;
+}
+
+async function many(sql, params = []) {
+    const { rows } = await pg.query(sql, params);
+    return rows;
+}
+
 class ScheduleDatabaseService {
     async findAnimeByFilenameTitle(title) {
         const normalized = normalizeFilenameTitle(title);
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .select('*')
-            .eq('filename_title', normalized)
-            .maybeSingle();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one('SELECT * FROM anime_posts WHERE filename_title = $1', [normalized]);
+        return mapAnime(row);
     }
 
     async getAnimeById(id) {
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .select('*')
-            .eq('id', id)
-            .maybeSingle();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one('SELECT * FROM anime_posts WHERE id = $1', [id]);
+        return mapAnime(row);
     }
 
     async getAnimeBySlug(slug) {
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .select('*')
-            .eq('slug', slug)
-            .maybeSingle();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one('SELECT * FROM anime_posts WHERE slug = $1', [slug]);
+        return mapAnime(row);
     }
 
     async upsertAnime(anime) {
-        const row = {
-            slug: anime.slug,
-            title: anime.title,
-            filename_title: anime.filenameTitle,
-            staff: anime.staff ?? null,
-            has_karaoke: anime.hasKaraoke ?? false,
-            season: anime.season ?? 1,
-            status: anime.status ?? 'ongoing',
-            subtitle_mode: anime.subtitleMode ?? 'per_episode',
-            hashtag: anime.hashtag ?? null,
-            donation_url: anime.donationUrl ?? null,
-            synopsis_url: anime.synopsisUrl ?? null,
-            pack_episodes_slug: anime.packEpisodesSlug ?? null,
-            pack_subtitle_key: anime.packSubtitleKey ?? null,
-            template_message_id: anime.templateMessageId ?? null,
-            latest_schedule_message_id: anime.latestScheduleMessageId ?? null,
-            cover_photo_file_id: anime.coverPhotoFileId ?? null,
-            channel_id: anime.channelId,
-            updated_at: new Date().toISOString()
-        };
-
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .upsert(row, { onConflict: 'slug' })
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one(
+            `INSERT INTO anime_posts (
+                slug, title, filename_title, staff, has_karaoke, season, status,
+                subtitle_mode, hashtag, donation_url, synopsis_url, pack_episodes_slug,
+                pack_subtitle_key, template_message_id, latest_schedule_message_id,
+                cover_photo_file_id, channel_id, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now()
+            )
+            ON CONFLICT (slug) DO UPDATE SET
+                title = EXCLUDED.title,
+                filename_title = EXCLUDED.filename_title,
+                staff = EXCLUDED.staff,
+                has_karaoke = EXCLUDED.has_karaoke,
+                season = EXCLUDED.season,
+                status = EXCLUDED.status,
+                subtitle_mode = EXCLUDED.subtitle_mode,
+                hashtag = EXCLUDED.hashtag,
+                donation_url = EXCLUDED.donation_url,
+                synopsis_url = EXCLUDED.synopsis_url,
+                pack_episodes_slug = EXCLUDED.pack_episodes_slug,
+                pack_subtitle_key = EXCLUDED.pack_subtitle_key,
+                template_message_id = EXCLUDED.template_message_id,
+                latest_schedule_message_id = EXCLUDED.latest_schedule_message_id,
+                cover_photo_file_id = EXCLUDED.cover_photo_file_id,
+                channel_id = EXCLUDED.channel_id,
+                updated_at = now()
+            RETURNING *`,
+            [
+                anime.slug,
+                anime.title,
+                anime.filenameTitle,
+                anime.staff ?? null,
+                anime.hasKaraoke ?? false,
+                anime.season ?? 1,
+                anime.status ?? 'ongoing',
+                anime.subtitleMode ?? 'per_episode',
+                anime.hashtag ?? null,
+                anime.donationUrl ?? null,
+                anime.synopsisUrl ?? null,
+                anime.packEpisodesSlug ?? null,
+                anime.packSubtitleKey ?? null,
+                anime.templateMessageId ?? null,
+                anime.latestScheduleMessageId ?? null,
+                anime.coverPhotoFileId ?? null,
+                anime.channelId
+            ]
+        );
+        return mapAnime(row);
     }
 
     async listEpisodes(animeId) {
-        const { data, error } = await supabase
-            .from('anime_episode_files')
-            .select('*')
-            .eq('anime_id', animeId)
-            .order('episode', { ascending: true });
-        if (error) throw error;
-        return (data || []).map(mapEpisode);
+        const rows = await many(
+            'SELECT * FROM anime_episode_files WHERE anime_id = $1 ORDER BY episode ASC',
+            [animeId]
+        );
+        return rows.map(mapEpisode);
     }
 
     async upsertEpisode(animeId, episode, videoKey, subtitleKey) {
-        const { data, error } = await supabase
-            .from('anime_episode_files')
-            .upsert(
-                {
-                    anime_id: animeId,
-                    episode,
-                    video_key: videoKey,
-                    subtitle_key: subtitleKey
-                },
-                { onConflict: 'anime_id,episode' }
-            )
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapEpisode(data);
+        const row = await one(
+            `INSERT INTO anime_episode_files (anime_id, episode, video_key, subtitle_key)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (anime_id, episode) DO UPDATE SET
+                video_key = EXCLUDED.video_key,
+                subtitle_key = EXCLUDED.subtitle_key
+             RETURNING *`,
+            [animeId, episode, videoKey, subtitleKey]
+        );
+        return mapEpisode(row);
     }
 
     async upsertUploadBatch(animeId, episode, kind, fileKey) {
-        const { data: existing, error: fetchErr } = await supabase
-            .from('episode_upload_batches')
-            .select('*')
-            .eq('anime_id', animeId)
-            .eq('episode', episode)
-            .maybeSingle();
-        if (fetchErr) throw fetchErr;
+        const existing = await one(
+            'SELECT * FROM episode_upload_batches WHERE anime_id = $1 AND episode = $2',
+            [animeId, episode]
+        );
 
         let videoKey = kind === 'video' ? fileKey : (existing?.video_key ?? null);
         let subtitleKey = kind === 'subtitle' ? fileKey : (existing?.subtitle_key ?? null);
 
-        // Re-uploading one half (new key) invalidates the other — not the first arrival.
         if (existing) {
             if (kind === 'video' && existing.video_key && existing.video_key !== fileKey) {
                 subtitleKey = null;
@@ -177,35 +182,30 @@ class ScheduleDatabaseService {
             videoKey !== existing.video_key ||
             subtitleKey !== existing.subtitle_key;
 
-        // Allow re-test uploads: new file keys reopen a previously done batch.
         const status =
             existing?.status === 'done' && !keysChanged ? 'done' : 'pending';
 
-        const row = {
-            anime_id: animeId,
-            episode,
-            video_key: videoKey,
-            subtitle_key: subtitleKey,
-            status,
-            updated_at: new Date().toISOString()
-        };
-
-        const { data, error } = await supabase
-            .from('episode_upload_batches')
-            .upsert(row, { onConflict: 'anime_id,episode' })
-            .select('*')
-            .single();
-        if (error) throw error;
-        return data;
+        return one(
+            `INSERT INTO episode_upload_batches (
+                anime_id, episode, video_key, subtitle_key, status, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, now())
+            ON CONFLICT (anime_id, episode) DO UPDATE SET
+                video_key = EXCLUDED.video_key,
+                subtitle_key = EXCLUDED.subtitle_key,
+                status = EXCLUDED.status,
+                updated_at = now()
+            RETURNING *`,
+            [animeId, episode, videoKey, subtitleKey, status]
+        );
     }
 
     async markBatchDone(animeId, episode) {
-        const { error } = await supabase
-            .from('episode_upload_batches')
-            .update({ status: 'done', updated_at: new Date().toISOString() })
-            .eq('anime_id', animeId)
-            .eq('episode', episode);
-        if (error) throw error;
+        await pg.query(
+            `UPDATE episode_upload_batches
+             SET status = 'done', updated_at = now()
+             WHERE anime_id = $1 AND episode = $2`,
+            [animeId, episode]
+        );
     }
 
     async getMaxPublishedEpisode(animeId) {
@@ -215,319 +215,294 @@ class ScheduleDatabaseService {
     }
 
     async getReadyBatch(animeId, episode, packOnly = false) {
-        const { data, error } = await supabase
-            .from('episode_upload_batches')
-            .select('*')
-            .eq('anime_id', animeId)
-            .eq('episode', episode)
-            .eq('status', 'pending')
-            .maybeSingle();
-        if (error) throw error;
-        if (!data?.video_key) return null;
-        if (!packOnly && !data.subtitle_key) return null;
-        return data;
+        const row = await one(
+            `SELECT * FROM episode_upload_batches
+             WHERE anime_id = $1 AND episode = $2 AND status = 'pending'`,
+            [animeId, episode]
+        );
+        if (!row?.video_key) return null;
+        if (!packOnly && !row.subtitle_key) return null;
+        return row;
     }
 
     async countReadyBatchesAfter(animeId, afterEpisode, packOnly = false) {
-        let query = supabase
-            .from('episode_upload_batches')
-            .select('episode')
-            .eq('anime_id', animeId)
-            .eq('status', 'pending')
-            .gt('episode', afterEpisode)
-            .not('video_key', 'is', null);
-
-        if (!packOnly) {
-            query = query.not('subtitle_key', 'is', null);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
-        return (data || []).length;
+        const sql = packOnly
+            ? `SELECT episode FROM episode_upload_batches
+               WHERE anime_id = $1 AND status = 'pending' AND episode > $2 AND video_key IS NOT NULL`
+            : `SELECT episode FROM episode_upload_batches
+               WHERE anime_id = $1 AND status = 'pending' AND episode > $2
+                 AND video_key IS NOT NULL AND subtitle_key IS NOT NULL`;
+        const rows = await many(sql, [animeId, afterEpisode]);
+        return rows.length;
     }
 
     async findAnyActivePendingRelease(animeId) {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('anime_id', animeId)
-            .in('status', ['pending', 'publishing'])
-            .order('episode', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `SELECT * FROM schedule_pending_releases
+             WHERE anime_id = $1 AND status IN ('pending', 'publishing')
+             ORDER BY episode ASC
+             LIMIT 1`,
+            [animeId]
+        );
+        return mapPending(row);
     }
 
     async findActivePendingRelease(animeId, episode) {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('anime_id', animeId)
-            .eq('episode', episode)
-            .in('status', ['pending', 'publishing'])
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `SELECT * FROM schedule_pending_releases
+             WHERE anime_id = $1 AND episode = $2 AND status IN ('pending', 'publishing')`,
+            [animeId, episode]
+        );
+        return mapPending(row);
     }
 
-    /** Atomically mark pending → publishing; returns null if already claimed. */
     async claimPendingRelease(id) {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .update({
-                status: 'publishing',
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', id)
-            .eq('status', 'pending')
-            .select('*')
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `UPDATE schedule_pending_releases
+             SET status = 'publishing', updated_at = now()
+             WHERE id = $1 AND status = 'pending'
+             RETURNING *`,
+            [id]
+        );
+        return mapPending(row);
     }
 
     async releasePendingClaim(id) {
-        const { error } = await supabase
-            .from('schedule_pending_releases')
-            .update({
-                status: 'pending',
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', id)
-            .eq('status', 'publishing');
-        if (error) throw error;
+        await pg.query(
+            `UPDATE schedule_pending_releases
+             SET status = 'pending', updated_at = now()
+             WHERE id = $1 AND status = 'publishing'`,
+            [id]
+        );
     }
 
     async createPendingRelease(payload) {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .insert({
-                anime_id: payload.animeId,
-                episode: payload.episode,
-                video_key: payload.videoKey,
-                subtitle_key: payload.subtitleKey,
-                mark_completed: payload.markCompleted ?? false,
-                proposed_caption: payload.proposedCaption,
-                status: 'pending',
-                admin_preview_chat_id: payload.adminPreviewChatId ?? null,
-                admin_preview_message_id: payload.adminPreviewMessageId ?? null,
-                needs_cover_photo: payload.needsCoverPhoto ?? false
-            })
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `INSERT INTO schedule_pending_releases (
+                anime_id, episode, video_key, subtitle_key, mark_completed,
+                proposed_caption, status, admin_preview_chat_id, admin_preview_message_id,
+                needs_cover_photo
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+            RETURNING *`,
+            [
+                payload.animeId,
+                payload.episode,
+                payload.videoKey,
+                payload.subtitleKey,
+                payload.markCompleted ?? false,
+                payload.proposedCaption,
+                payload.adminPreviewChatId ?? null,
+                payload.adminPreviewMessageId ?? null,
+                payload.needsCoverPhoto ?? false
+            ]
+        );
+        return mapPending(row);
     }
 
     async getPendingById(id) {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('id', id)
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one('SELECT * FROM schedule_pending_releases WHERE id = $1', [id]);
+        return mapPending(row);
     }
 
     async updatePending(id, patch) {
-        const dbPatch = { updated_at: new Date().toISOString() };
-        if (patch.status !== undefined) dbPatch.status = patch.status;
-        if (patch.markCompleted !== undefined) dbPatch.mark_completed = patch.markCompleted;
-        if (patch.proposedCaption !== undefined) dbPatch.proposed_caption = patch.proposedCaption;
-        if (patch.adminPreviewChatId !== undefined) dbPatch.admin_preview_chat_id = patch.adminPreviewChatId;
-        if (patch.adminPreviewMessageId !== undefined) {
-            dbPatch.admin_preview_message_id = patch.adminPreviewMessageId;
-        }
-        if (patch.publishedMessageId !== undefined) dbPatch.published_message_id = patch.publishedMessageId;
-        if (patch.publishAt !== undefined) dbPatch.publish_at = patch.publishAt;
-        if (patch.needsCoverPhoto !== undefined) dbPatch.needs_cover_photo = patch.needsCoverPhoto;
-        if (patch.coverPhotoFileId !== undefined) dbPatch.cover_photo_file_id = patch.coverPhotoFileId;
-        if (patch.needsPackInfo !== undefined) dbPatch.needs_pack_info = patch.needsPackInfo;
-        if (patch.packEpisodesSlug !== undefined) dbPatch.pack_episodes_slug = patch.packEpisodesSlug;
-        if (patch.packSubtitleKey !== undefined) dbPatch.pack_subtitle_key = patch.packSubtitleKey;
+        const fields = [];
+        const values = [];
+        let i = 1;
 
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .update(dbPatch)
-            .eq('id', id)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapPending(data);
+        const add = (col, val) => {
+            fields.push(`${col} = $${i++}`);
+            values.push(val);
+        };
+
+        if (patch.status !== undefined) add('status', patch.status);
+        if (patch.markCompleted !== undefined) add('mark_completed', patch.markCompleted);
+        if (patch.proposedCaption !== undefined) add('proposed_caption', patch.proposedCaption);
+        if (patch.adminPreviewChatId !== undefined) add('admin_preview_chat_id', patch.adminPreviewChatId);
+        if (patch.adminPreviewMessageId !== undefined) {
+            add('admin_preview_message_id', patch.adminPreviewMessageId);
+        }
+        if (patch.publishedMessageId !== undefined) add('published_message_id', patch.publishedMessageId);
+        if (patch.publishAt !== undefined) add('publish_at', patch.publishAt);
+        if (patch.needsCoverPhoto !== undefined) add('needs_cover_photo', patch.needsCoverPhoto);
+        if (patch.coverPhotoFileId !== undefined) add('cover_photo_file_id', patch.coverPhotoFileId);
+        if (patch.needsPackInfo !== undefined) add('needs_pack_info', patch.needsPackInfo);
+        if (patch.packEpisodesSlug !== undefined) add('pack_episodes_slug', patch.packEpisodesSlug);
+        if (patch.packSubtitleKey !== undefined) add('pack_subtitle_key', patch.packSubtitleKey);
+
+        fields.push('updated_at = now()');
+        values.push(id);
+
+        const row = await one(
+            `UPDATE schedule_pending_releases SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+            values
+        );
+        return mapPending(row);
     }
 
     async findPendingAwaitingPack() {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('status', 'pending')
-            .eq('needs_pack_info', true)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `SELECT * FROM schedule_pending_releases
+             WHERE status = 'pending' AND needs_pack_info = true
+             ORDER BY created_at DESC
+             LIMIT 1`
+        );
+        return mapPending(row);
     }
 
     async updateAnimeCoverPhoto(animeId, coverPhotoFileId) {
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .update({
-                cover_photo_file_id: coverPhotoFileId,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', animeId)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one(
+            `UPDATE anime_posts
+             SET cover_photo_file_id = $2, updated_at = now()
+             WHERE id = $1
+             RETURNING *`,
+            [animeId, coverPhotoFileId]
+        );
+        return mapAnime(row);
     }
 
     async updateAnimePacks(animeId, packEpisodesSlug, packSubtitleKey) {
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .update({
-                pack_episodes_slug: packEpisodesSlug,
-                pack_subtitle_key: packSubtitleKey,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', animeId)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = await one(
+            `UPDATE anime_posts
+             SET pack_episodes_slug = $2, pack_subtitle_key = $3, updated_at = now()
+             WHERE id = $1
+             RETURNING *`,
+            [animeId, packEpisodesSlug, packSubtitleKey]
+        );
+        return mapAnime(row);
     }
 
     async findPendingAwaitingCover() {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('status', 'pending')
-            .eq('needs_cover_photo', true)
-            .is('cover_photo_file_id', null)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (error) throw error;
-        return mapPending(data);
+        const row = await one(
+            `SELECT * FROM schedule_pending_releases
+             WHERE status = 'pending' AND needs_cover_photo = true AND cover_photo_file_id IS NULL
+             ORDER BY created_at DESC
+             LIMIT 1`
+        );
+        return mapPending(row);
     }
 
     async listScheduledReleases() {
-        const { data, error } = await supabase
-            .from('schedule_pending_releases')
-            .select('*')
-            .eq('status', 'scheduled')
-            .order('publish_at', { ascending: true });
-        if (error) throw error;
-        return (data || []).map(mapPending);
+        const rows = await many(
+            `SELECT * FROM schedule_pending_releases
+             WHERE status = 'scheduled'
+             ORDER BY publish_at ASC`
+        );
+        return rows.map(mapPending);
     }
 
     async upsertAnimeRegistration(filenameTitle, romajiDisplay, kind, fileKey) {
-        const { data: existing, error: fetchErr } = await supabase
-            .from('anime_registration_pending')
-            .select('*')
-            .eq('filename_title', filenameTitle)
-            .maybeSingle();
-        if (fetchErr) throw fetchErr;
+        const existing = await one(
+            'SELECT * FROM anime_registration_pending WHERE filename_title = $1',
+            [filenameTitle]
+        );
 
-        const row = {
-            filename_title: filenameTitle,
-            romaji_display: romajiDisplay,
-            video_key: kind === 'video' ? fileKey : (existing?.video_key ?? null),
-            subtitle_key: kind === 'subtitle' ? fileKey : (existing?.subtitle_key ?? null),
-            asked_at: existing?.asked_at ?? null,
-            registration_step: existing?.registration_step ?? null,
-            english_title: existing?.english_title ?? null,
-            synopsis_url: existing?.synopsis_url ?? null,
-            hashtag: existing?.hashtag ?? null,
-            subtitle_mode: existing?.subtitle_mode ?? null,
-            staff: existing?.staff ?? null,
-            has_karaoke: existing?.has_karaoke ?? null,
-            cover_photo_file_id: existing?.cover_photo_file_id ?? null,
-            updated_at: new Date().toISOString()
-        };
-
-        const { data, error } = await supabase
-            .from('anime_registration_pending')
-            .upsert(row, { onConflict: 'filename_title' })
-            .select('*')
-            .single();
-        if (error) throw error;
-        return data;
+        const row = await one(
+            `INSERT INTO anime_registration_pending (
+                filename_title, romaji_display, video_key, subtitle_key, asked_at,
+                registration_step, english_title, synopsis_url, hashtag, subtitle_mode,
+                staff, has_karaoke, cover_photo_file_id, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+            ON CONFLICT (filename_title) DO UPDATE SET
+                romaji_display = EXCLUDED.romaji_display,
+                video_key = EXCLUDED.video_key,
+                subtitle_key = EXCLUDED.subtitle_key,
+                asked_at = EXCLUDED.asked_at,
+                registration_step = EXCLUDED.registration_step,
+                english_title = EXCLUDED.english_title,
+                synopsis_url = EXCLUDED.synopsis_url,
+                hashtag = EXCLUDED.hashtag,
+                subtitle_mode = EXCLUDED.subtitle_mode,
+                staff = EXCLUDED.staff,
+                has_karaoke = EXCLUDED.has_karaoke,
+                cover_photo_file_id = EXCLUDED.cover_photo_file_id,
+                updated_at = now()
+            RETURNING *`,
+            [
+                filenameTitle,
+                romajiDisplay,
+                kind === 'video' ? fileKey : (existing?.video_key ?? null),
+                kind === 'subtitle' ? fileKey : (existing?.subtitle_key ?? null),
+                existing?.asked_at ?? null,
+                existing?.registration_step ?? null,
+                existing?.english_title ?? null,
+                existing?.synopsis_url ?? null,
+                existing?.hashtag ?? null,
+                existing?.subtitle_mode ?? null,
+                existing?.staff ?? null,
+                existing?.has_karaoke ?? null,
+                existing?.cover_photo_file_id ?? null
+            ]
+        );
+        return row;
     }
 
     async markAnimeRegistrationAsked(filenameTitle) {
-        const { data, error } = await supabase
-            .from('anime_registration_pending')
-            .update({
-                asked_at: new Date().toISOString(),
-                registration_step: 'english',
-                updated_at: new Date().toISOString()
-            })
-            .eq('filename_title', filenameTitle)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return data;
+        return one(
+            `UPDATE anime_registration_pending
+             SET asked_at = now(), registration_step = 'english', updated_at = now()
+             WHERE filename_title = $1
+             RETURNING *`,
+            [filenameTitle]
+        );
     }
 
     async findActiveAnimeRegistration() {
-        const { data, error } = await supabase
-            .from('anime_registration_pending')
-            .select('*')
-            .not('asked_at', 'is', null)
-            .order('asked_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (error) throw error;
-        return data;
+        return one(
+            `SELECT * FROM anime_registration_pending
+             WHERE asked_at IS NOT NULL
+             ORDER BY asked_at DESC
+             LIMIT 1`
+        );
     }
 
     async getAnimeRegistration(filenameTitle) {
-        const { data, error } = await supabase
-            .from('anime_registration_pending')
-            .select('*')
-            .eq('filename_title', filenameTitle)
-            .maybeSingle();
-        if (error) throw error;
-        return data;
+        return one(
+            'SELECT * FROM anime_registration_pending WHERE filename_title = $1',
+            [filenameTitle]
+        );
     }
 
     async updateAnimeRegistration(filenameTitle, patch) {
-        const { data, error } = await supabase
-            .from('anime_registration_pending')
-            .update({ ...patch, updated_at: new Date().toISOString() })
-            .eq('filename_title', filenameTitle)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return data;
+        const keys = Object.keys(patch);
+        if (!keys.length) {
+            return this.getAnimeRegistration(filenameTitle);
+        }
+
+        const fields = keys.map((key, idx) => `${key} = $${idx + 2}`);
+        fields.push('updated_at = now()');
+        const values = [filenameTitle, ...keys.map((key) => patch[key])];
+
+        return one(
+            `UPDATE anime_registration_pending SET ${fields.join(', ')}
+             WHERE filename_title = $1
+             RETURNING *`,
+            values
+        );
     }
 
     async deleteAnimeRegistration(filenameTitle) {
-        const { error } = await supabase
-            .from('anime_registration_pending')
-            .delete()
-            .eq('filename_title', filenameTitle);
-        if (error) throw error;
+        await pg.query('DELETE FROM anime_registration_pending WHERE filename_title = $1', [
+            filenameTitle
+        ]);
     }
 
     async updateAnimeScheduleMessage(animeId, messageId, status) {
-        const patch = {
-            latest_schedule_message_id: messageId,
-            updated_at: new Date().toISOString()
-        };
-        if (status) patch.status = status;
-
-        const { data, error } = await supabase
-            .from('anime_posts')
-            .update(patch)
-            .eq('id', animeId)
-            .select('*')
-            .single();
-        if (error) throw error;
-        return mapAnime(data);
+        const row = status
+            ? await one(
+                  `UPDATE anime_posts
+                   SET latest_schedule_message_id = $2, status = $3, updated_at = now()
+                   WHERE id = $1
+                   RETURNING *`,
+                  [animeId, messageId, status]
+              )
+            : await one(
+                  `UPDATE anime_posts
+                   SET latest_schedule_message_id = $2, updated_at = now()
+                   WHERE id = $1
+                   RETURNING *`,
+                  [animeId, messageId]
+              );
+        return mapAnime(row);
     }
 }
 

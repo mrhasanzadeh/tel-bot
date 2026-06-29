@@ -1,4 +1,4 @@
--- Core file-sharing tables (run once in Supabase SQL editor)
+-- Core file-sharing tables (run once in Postgres (psql))
 
 CREATE TABLE IF NOT EXISTS files (
     key TEXT PRIMARY KEY,

@@ -1,7 +1,7 @@
 /**
  * One-time import: Chitose (Chiramune) anime + E01–E13 keys from post 681.
  * Run: node src/scripts/importChiramuneSchedule.js
- * Requires: supabase/schedule_schema.sql applied first.
+ * Requires: scripts/sql/schedule_schema.sql applied first.
  */
 require('dotenv').config();
 

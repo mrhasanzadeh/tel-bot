@@ -501,7 +501,7 @@ class ScheduleService {
                 ctx,
                 `${e('error')} ساخت پیش‌نمایش E01 ناموفق بود.\n` +
                     `<code>${escapeHtml(error.message || String(error))}</code>\n\n` +
-                    `اگر ستون دیتابیس کم است، <code>schedule_schema_catchup.sql</code> را در Supabase اجرا کن.\n` +
+                    `اگر ستون دیتابیس کم است، <code>scripts/sql/schedule_schema_catchup.sql</code> را روی Postgres اجرا کن.\n` +
                     `بعد ری‌استارت بات و دوباره E01 را در آرشیو آپلود کن.`
             );
         }

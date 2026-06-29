@@ -1,4 +1,4 @@
--- Run once in Supabase SQL editor
+-- Run once in Postgres (psql)
 
 CREATE TABLE IF NOT EXISTS anime_posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

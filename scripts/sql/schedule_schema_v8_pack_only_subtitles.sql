@@ -1,4 +1,4 @@
--- Run once in Supabase SQL editor (after v7)
+-- Run once in Postgres (psql) (after v7)
 
 ALTER TABLE anime_posts
     ADD COLUMN IF NOT EXISTS subtitle_mode TEXT NOT NULL DEFAULT 'per_episode'
