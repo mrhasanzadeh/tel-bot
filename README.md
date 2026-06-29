@@ -26,9 +26,9 @@ Telegram bot for sharing files with channel membership verification, pack downlo
     ├── index.js                   # Entry point
     ├── handlers/botHandlers.js
     └── services/
-        ├── databaseService.js     # Postgres (files + packs)
-        ├── postgresClient.js      # DATABASE_URL pool
-        ├── scheduleDatabaseService.js  # Postgres (schedule)
+        ├── databaseService.js     # Shiori API client (files + packs)
+        ├── shioriApiClient.js     # HTTP to api.shiori.cloud
+        ├── scheduleDatabaseService.js  # Postgres (schedule scripts only)
         └── ...
 ```
 
@@ -36,29 +36,23 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 
 1. `npm install`
 2. Copy `deploy/.env.example` → `deploy/.env` and fill values
-3. Apply `scripts/sql/files_schema.sql` and `scripts/sql/bot_settings_schema.sql` on Postgres
-4. For schedule: run `scripts/sql/schedule_schema.sql` and versioned migrations (`schedule_schema_v*.sql`) as needed
-5. `npm start`
+3. Set `BOT_API_TOKEN` on **api.shiori.cloud** (same value as tel-bot)
+4. `npm start`
 
 ### Main env vars
 
 | Variable | Purpose |
 |----------|---------|
 | `BOT_TOKEN` | Telegram bot token |
-| `DATABASE_URL` | Postgres — files, packs, schedule (same DB as shiori-api or dedicated) |
+| `SHIORI_API_URL` | Shiori API base URL (e.g. `https://api.shiori.cloud`) |
+| `BOT_API_TOKEN` | Shared secret for `x-bot-token` header |
 | `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
 | `LINKS_CHANNEL_ID` | Archive upload channel (copied into private) |
 | `ARCHIVE_MIRROR_ENABLED` | Default archive → private copy on boot (`true`/`false`; override with `/mirroring`) |
 | `PUBLIC_*` / `ADDITIONAL_*` | Membership channels |
 | `PACK_FILE_DELETE_MS` | Pack file auto-delete delay (default `120000`) |
 
-Example `DATABASE_URL` when Postgres runs in Docker on the same host as tel-bot:
-
-```env
-DATABASE_URL=postgresql://shiori:PASSWORD@172.17.0.1:5432/shiori
-```
-
-Or join both containers to the same Docker network and use the Postgres service hostname.
+Schedule module is **disabled** when `SHIORI_API_URL` is set (requires direct Postgres). Local schedule import scripts may still use `DATABASE_URL` via devDependency `pg`.
 
 ### Premium custom emoji
 

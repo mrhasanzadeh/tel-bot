@@ -1,11 +1,4 @@
-const pg = require('./postgresClient');
-
-const ENSURE_TABLE_SQL = `
-CREATE TABLE IF NOT EXISTS bot_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)`;
+const api = require('./shioriApiClient');
 
 class BotSettingsService {
     constructor() {
@@ -18,7 +11,7 @@ class BotSettingsService {
 
     async ensureReady() {
         if (this.ready) return;
-        await pg.query(ENSURE_TABLE_SQL);
+        await api.ping();
         this.ready = true;
     }
 
@@ -28,11 +21,8 @@ class BotSettingsService {
      */
     async get(key) {
         await this.ensureReady();
-        const { rows } = await pg.query(
-            `SELECT value FROM bot_settings WHERE key = $1 LIMIT 1`,
-            [key]
-        );
-        return rows[0]?.value ?? null;
+        const res = await api.get(`/bot/settings/${encodeURIComponent(key)}`);
+        return res?.data?.value ?? null;
     }
 
     /**
@@ -41,14 +31,7 @@ class BotSettingsService {
      */
     async set(key, value) {
         await this.ensureReady();
-        await pg.query(
-            `INSERT INTO bot_settings (key, value, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (key) DO UPDATE SET
-                value = EXCLUDED.value,
-                updated_at = NOW()`,
-            [key, value]
-        );
+        await api.put(`/bot/settings/${encodeURIComponent(key)}`, { value: String(value) });
     }
 
     /**
@@ -57,8 +40,8 @@ class BotSettingsService {
      */
     async delete(key) {
         await this.ensureReady();
-        const { rowCount } = await pg.query(`DELETE FROM bot_settings WHERE key = $1`, [key]);
-        return (rowCount || 0) > 0;
+        const res = await api.delete(`/bot/settings/${encodeURIComponent(key)}`);
+        return Boolean(res?.data?.deleted);
     }
 }
 

@@ -1,7 +1,7 @@
-const pg = require('./postgresClient');
+const api = require('./shioriApiClient');
 
 /**
- * File + pack persistence on the main Postgres (shared with shiori-api).
+ * File + pack persistence via api.shiori.cloud (no direct Postgres).
  */
 class DatabaseService {
     constructor() {
@@ -15,116 +15,79 @@ class DatabaseService {
     async connect() {
         if (this.isConnected) return;
 
-        await pg.query('SELECT key FROM files LIMIT 1');
-        console.log('✅ Successfully connected to Postgres (files)');
+        await api.ping();
+        console.log('✅ Successfully connected to Shiori API (files)');
         this.isConnected = true;
     }
 
     async _ensureConnection() {
         if (!this.isConnected) {
-            console.log('🔄 Connecting to Postgres...');
+            console.log('🔄 Connecting to Shiori API...');
             await this.connect();
         }
     }
 
-    _fromDb(row) {
-        if (!row) return null;
+    _fromApi(data) {
+        if (!data) return null;
         return {
-            key: row.key,
-            messageId: row.message_id != null ? Number(row.message_id) : null,
-            type: row.type ?? null,
-            fileId: row.file_id ?? null,
-            fileName: row.file_name ?? null,
-            fileSize: row.file_size != null ? Number(row.file_size) : null,
-            caption: row.caption ?? null,
-            date: row.created_at ? new Date(row.created_at) : undefined,
-            downloads: row.downloads ?? 0,
-            lastAccessed: row.last_accessed ? new Date(row.last_accessed) : undefined,
-            isActive: row.is_active ?? true,
+            key: data.key,
+            messageId: data.messageId != null ? Number(data.messageId) : null,
+            type: data.type ?? null,
+            fileId: data.fileId ?? null,
+            fileName: data.fileName ?? null,
+            fileSize: data.fileSize != null ? Number(data.fileSize) : null,
+            caption: data.caption ?? null,
+            date: data.createdAt ? new Date(data.createdAt) : undefined,
+            downloads: data.downloads ?? 0,
+            lastAccessed: data.lastAccessed ? new Date(data.lastAccessed) : undefined,
+            isActive: data.isActive ?? true
         };
-    }
-
-    _createdAtValue(fileData) {
-        if (fileData?.date != null) {
-            const d = new Date(fileData.date);
-            if (!Number.isNaN(d.getTime())) return d;
-        }
-        return new Date();
     }
 
     async createFile(fileData) {
         await this._ensureConnection();
 
-        const { rows } = await pg.query(
-            `INSERT INTO files (
-                key, message_id, type, file_id, file_name, file_size, caption,
-                downloads, last_accessed, is_active, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING *`,
-            [
-                fileData.key,
-                fileData.messageId,
-                fileData.type,
-                fileData.fileId,
-                fileData.fileName ?? null,
-                fileData.fileSize ?? null,
-                fileData.caption ?? null,
-                fileData.downloads ?? 0,
-                fileData.lastAccessed ?? null,
-                fileData.isActive !== false,
-                this._createdAtValue(fileData),
-            ]
-        );
+        const res = await api.post('/bot/files', {
+            key: fileData.key,
+            messageId: fileData.messageId,
+            type: fileData.type,
+            fileId: fileData.fileId,
+            fileName: fileData.fileName ?? null,
+            fileSize: fileData.fileSize ?? null,
+            caption: fileData.caption ?? null,
+            downloads: fileData.downloads ?? 0,
+            isActive: fileData.isActive !== false
+        });
 
         console.log(`✅ File saved with key: ${fileData.key}`);
-        return this._fromDb(rows[0]);
+        return this._fromApi(res?.data);
     }
 
     async upsertFile(fileData) {
         await this._ensureConnection();
 
-        const { rows } = await pg.query(
-            `INSERT INTO files (
-                key, message_id, type, file_id, file_name, file_size, caption, is_active, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
-            ON CONFLICT (key) DO UPDATE SET
-                message_id = EXCLUDED.message_id,
-                type = EXCLUDED.type,
-                file_id = EXCLUDED.file_id,
-                file_name = EXCLUDED.file_name,
-                file_size = EXCLUDED.file_size,
-                caption = EXCLUDED.caption,
-                is_active = true
-            RETURNING *`,
-            [
-                fileData.key,
-                fileData.messageId,
-                fileData.type,
-                fileData.fileId,
-                fileData.fileName ?? null,
-                fileData.fileSize ?? null,
-                fileData.caption ?? null,
-                this._createdAtValue(fileData),
-            ]
-        );
+        const res = await api.put(`/bot/files/${encodeURIComponent(fileData.key)}`, {
+            messageId: fileData.messageId,
+            type: fileData.type,
+            fileId: fileData.fileId,
+            fileName: fileData.fileName ?? null,
+            fileSize: fileData.fileSize ?? null,
+            caption: fileData.caption ?? null
+        });
 
-        return this._fromDb(rows[0]);
+        return this._fromApi(res?.data);
     }
 
     async getFileByKey(key) {
         await this._ensureConnection();
 
-        const { rows } = await pg.query(
-            `SELECT * FROM files WHERE key = $1 AND is_active = true LIMIT 1`,
-            [key]
-        );
-
-        if (rows.length === 0) {
+        const res = await api.get(`/bot/files/${encodeURIComponent(key)}`);
+        if (!res?.data) {
             console.log(`⚠️ File not found with key: ${key}`);
             return null;
         }
 
-        return this._fromDb(rows[0]);
+        return this._fromApi(res.data);
     }
 
     async getFilePackBySlug(slug) {
@@ -133,13 +96,8 @@ class DatabaseService {
         const cleanSlug = String(slug ?? '').trim().toLowerCase();
         if (!cleanSlug) return null;
 
-        const { rows } = await pg.query(
-            `SELECT id, slug, title, description, is_active, created_at
-             FROM file_packs WHERE slug = $1 LIMIT 1`,
-            [cleanSlug]
-        );
-
-        const data = rows[0];
+        const res = await api.get(`/bot/packs/${encodeURIComponent(cleanSlug)}`);
+        const data = res?.data;
         if (!data) return null;
 
         return {
@@ -147,8 +105,8 @@ class DatabaseService {
             slug: String(data.slug),
             title: String(data.title ?? ''),
             description: data.description ?? null,
-            isActive: data.is_active ?? true,
-            createdAt: data.created_at ?? null,
+            isActive: data.isActive ?? true,
+            createdAt: data.createdAt ?? null
         };
     }
 
@@ -158,151 +116,59 @@ class DatabaseService {
         const cleanId = String(packId ?? '').trim();
         if (!cleanId) return [];
 
-        const { rows } = await pg.query(
-            `SELECT pack_id, file_key, sort_order
-             FROM file_pack_items
-             WHERE pack_id = $1
-             ORDER BY sort_order ASC`,
-            [cleanId]
-        );
+        const res = await api.get(`/bot/packs/${encodeURIComponent(cleanId)}/items`);
+        const items = res?.data ?? [];
 
-        return rows.map((row) => ({
-            packId: String(row.pack_id),
-            fileKey: String(row.file_key),
-            sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order ?? 0) || 0,
+        return items.map((row) => ({
+            packId: String(row.packId),
+            fileKey: String(row.fileKey),
+            sortOrder:
+                typeof row.sortOrder === 'number'
+                    ? row.sortOrder
+                    : Number(row.sortOrder ?? 0) || 0
         }));
     }
 
     async incrementFileDownloads(key) {
         await this._ensureConnection();
 
-        try {
-            const { rows } = await pg.query(`SELECT * FROM increment_file_downloads($1)`, [key]);
-            if (rows[0]) {
-                console.log(`✅ Downloads incremented for file with key ${key}`);
-                return this._fromDb(rows[0]);
-            }
-        } catch (err) {
-            if (err.code !== '42883') {
-                throw err;
-            }
-        }
-
-        const existing = await this.getFileByKey(key);
-        if (!existing) {
+        const res = await api.post(`/bot/files/${encodeURIComponent(key)}/downloads`);
+        if (!res?.data) {
             console.log(`⚠️ File not found for download increment: ${key}`);
             return null;
         }
 
-        const nextDownloads = (existing.downloads || 0) + 1;
-        const { rows } = await pg.query(
-            `UPDATE files
-             SET downloads = $2, last_accessed = now()
-             WHERE key = $1 AND is_active = true
-             RETURNING *`,
-            [key, nextDownloads]
-        );
-
-        console.log(`✅ Downloads incremented for file with key ${key} to ${nextDownloads}`);
-        return this._fromDb(rows[0]);
-    }
-
-    async getAllFiles(limit = 10, skip = 0) {
-        await this._ensureConnection();
-
-        const { rows } = await pg.query(
-            `SELECT * FROM files
-             WHERE is_active = true
-             ORDER BY created_at DESC NULLS LAST
-             LIMIT $1 OFFSET $2`,
-            [limit, skip]
-        );
-
-        return rows.map((row) => this._fromDb(row));
-    }
-
-    async deactivateFile(key) {
-        await this._ensureConnection();
-
-        const { rows } = await pg.query(
-            `UPDATE files
-             SET is_active = false, last_accessed = now()
-             WHERE key = $1
-             RETURNING *`,
-            [key]
-        );
-
-        console.log(`✅ File deactivated: ${key}`);
-        return this._fromDb(rows[0]);
-    }
-
-    async getFileStats() {
-        await this._ensureConnection();
-
-        const { rows } = await pg.query(
-            `SELECT downloads, file_size FROM files WHERE is_active = true`
-        );
-
-        const totalFiles = rows.length;
-        const totalDownloads = rows.reduce((sum, r) => sum + (r.downloads || 0), 0);
-        const totalSize = rows.reduce((sum, r) => sum + Number(r.file_size || 0), 0);
-        const averageDownloads = totalFiles > 0 ? totalDownloads / totalFiles : 0;
-
-        return {
-            totalFiles,
-            totalDownloads,
-            totalSize,
-            averageDownloads,
-        };
+        console.log(`✅ Downloads incremented for file with key ${key}`);
+        return this._fromApi(res.data);
     }
 
     async deactivateFilesByMessageId(messageId) {
         await this._ensureConnection();
 
-        const { rowCount } = await pg.query(
-            `UPDATE files
-             SET is_active = false, last_accessed = now()
-             WHERE message_id = $1 AND is_active = true`,
-            [messageId]
+        const res = await api.post(
+            `/bot/files/by-message/${encodeURIComponent(messageId)}/deactivate`
         );
-
-        return rowCount || 0;
+        return res?.data?.count ?? 0;
     }
 
     async updateFileByMessageId(messageId, updateData) {
         await this._ensureConnection();
 
-        const sets = [];
-        const values = [messageId];
-        let idx = 2;
+        const body = {};
+        if (updateData.fileId !== undefined) body.fileId = updateData.fileId;
+        if (updateData.fileName !== undefined) body.fileName = updateData.fileName;
+        if (updateData.fileSize !== undefined) body.fileSize = updateData.fileSize;
+        if (updateData.caption !== undefined) body.caption = updateData.caption;
 
-        if (updateData.fileId !== undefined) {
-            sets.push(`file_id = $${idx++}`);
-            values.push(updateData.fileId);
-        }
-        if (updateData.fileName !== undefined) {
-            sets.push(`file_name = $${idx++}`);
-            values.push(updateData.fileName);
-        }
-        if (updateData.fileSize !== undefined) {
-            sets.push(`file_size = $${idx++}`);
-            values.push(updateData.fileSize);
-        }
-        if (updateData.caption !== undefined) {
-            sets.push(`caption = $${idx++}`);
-            values.push(updateData.caption);
-        }
-
-        if (sets.length === 0) {
+        if (Object.keys(body).length === 0) {
             return { nModified: 0 };
         }
 
-        const { rowCount } = await pg.query(
-            `UPDATE files SET ${sets.join(', ')} WHERE message_id = $1`,
-            values
+        const res = await api.patch(
+            `/bot/files/by-message/${encodeURIComponent(messageId)}`,
+            body
         );
-
-        return { nModified: rowCount || 0 };
+        return { nModified: res?.data?.nModified ?? 0 };
     }
 }
 

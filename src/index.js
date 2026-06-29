@@ -20,7 +20,8 @@ if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === 
 // Validate required environment variables
 const requiredEnvVars = [
     'BOT_TOKEN',
-    'DATABASE_URL',
+    'SHIORI_API_URL',
+    'BOT_API_TOKEN',
     'PRIVATE_CHANNEL_ID',
     'PUBLIC_CHANNEL_ID',
     'PUBLIC_CHANNEL_USERNAME',
@@ -47,6 +48,10 @@ scheduleService.setTelegram(bot);
 
 if (!process.env.ADMIN_USER_ID?.trim()) {
     console.warn('⚠️ ADMIN_USER_ID is not set — schedule approval flow is disabled');
+} else if (process.env.SHIORI_API_URL?.trim()) {
+    console.warn(
+        '⚠️ Schedule module requires direct Postgres — disabled in API-only mode (SHIORI_API_URL is set)'
+    );
 }
 
 bot.catch((err, ctx) => {
@@ -54,7 +59,7 @@ bot.catch((err, ctx) => {
 });
 
 async function start() {
-    console.log('🔄 Connecting to Postgres...');
+    console.log('🔄 Connecting to Shiori API...');
     await databaseService.connect();
     await archiveMirrorService.init();
     const mirrorStatus = await archiveMirrorService.getStatus();

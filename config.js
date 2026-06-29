@@ -13,7 +13,8 @@ const parseEnvBool = (value, defaultValue = true) => {
 module.exports = {
     parseEnvBool,
     BOT_TOKEN: process.env.BOT_TOKEN,
-    DATABASE_URL: process.env.DATABASE_URL,
+    SHIORI_API_URL: process.env.SHIORI_API_URL,
+    BOT_API_TOKEN: process.env.BOT_API_TOKEN,
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,
     LINKS_CHANNEL_ID: process.env.LINKS_CHANNEL_ID,
     ARCHIVE_CHANNEL_ID: process.env.ARCHIVE_CHANNEL_ID || process.env.LINKS_CHANNEL_ID,

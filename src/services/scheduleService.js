@@ -27,6 +27,9 @@ class ScheduleService {
     }
 
     isEnabled() {
+        if (process.env.SHIORI_API_URL?.trim()) {
+            return false;
+        }
         return Boolean(
             getAdminUserId() &&
             getSchedulePublishChannelId() &&
