@@ -8,7 +8,9 @@ const databaseService = require('./services/databaseService');
 const membershipService = require('./services/membershipService');
 const { setupHandlers } = require('./handlers/botHandlers');
 const { logChannelSetup } = require('./services/channelSetup');
+const { runStartupSecurityChecks } = require('./services/botSecurity');
 const scheduleService = require('./services/scheduleService');
+const archiveMirrorService = require('./services/archiveMirrorService');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -18,8 +20,7 @@ if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === 
 // Validate required environment variables
 const requiredEnvVars = [
     'BOT_TOKEN',
-    'SUPABASE_URL',
-    'SUPABASE_SERVICE_ROLE_KEY',
+    'DATABASE_URL',
     'PRIVATE_CHANNEL_ID',
     'PUBLIC_CHANNEL_ID',
     'PUBLIC_CHANNEL_USERNAME',
@@ -39,6 +40,17 @@ if (!process.env.LINKS_CHANNEL_ID?.trim()) {
     );
 }
 
+const scheduleConfigured =
+    Boolean(process.env.SUPABASE_URL?.trim()) &&
+    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
+
+if (!scheduleConfigured) {
+    console.warn(
+        '⚠️ SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — schedule features disabled. ' +
+            'File storage uses DATABASE_URL (Postgres).'
+    );
+}
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 membershipService.setTelegram(bot);
@@ -54,6 +66,12 @@ bot.catch((err, ctx) => {
 
 async function start() {
     await databaseService.connect();
+    await archiveMirrorService.init();
+    const mirrorStatus = await archiveMirrorService.getStatus();
+    console.log(
+        `📋 Archive mirror: ${mirrorStatus.enabled ? 'ON' : 'OFF'} (source=${mirrorStatus.source}, env default=${mirrorStatus.envDefault ? 'ON' : 'OFF'})`
+    );
+    await runStartupSecurityChecks(bot);
 
     setupHandlers(bot);
 

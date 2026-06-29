@@ -1,18 +1,44 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let client = null;
 
-if (!supabaseUrl) {
-    throw new Error('SUPABASE_URL environment variable is not set');
-}
+const isScheduleDbConfigured = () =>
+    Boolean(
+        String(process.env.SUPABASE_URL ?? '').trim() &&
+            String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
+    );
 
-if (!supabaseKey) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is not set');
-}
+const getSupabase = () => {
+    if (client) return client;
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false }
-});
+    if (!isScheduleDbConfigured()) {
+        throw new Error(
+            'Schedule DB requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. ' +
+                'File storage uses DATABASE_URL (Postgres).'
+        );
+    }
+
+    client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false },
+    });
+
+    return client;
+};
+
+/** Proxy so scheduleDatabaseService keeps `supabase.from(...)` syntax. */
+const supabase = new Proxy(
+    {},
+    {
+        get(_target, prop) {
+            if (prop === 'getSupabase') return getSupabase;
+            if (prop === 'isScheduleDbConfigured') return isScheduleDbConfigured;
+
+            const value = getSupabase()[prop];
+            return typeof value === 'function' ? value.bind(getSupabase()) : value;
+        },
+    }
+);
 
 module.exports = supabase;
+module.exports.getSupabase = getSupabase;
+module.exports.isScheduleDbConfigured = isScheduleDbConfigured;

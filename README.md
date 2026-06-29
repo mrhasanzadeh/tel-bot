@@ -8,6 +8,7 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 - Unique file keys and direct `t.me` links
 - File packs with cancellable batch send
 - Archive channel upload → copy to private links channel (no forward label)
+- Toggle archive mirroring via `/mirroring` (admin) or `ARCHIVE_MIRROR_ENABLED` in `.env`
 - Premium custom emoji support (optional)
 - Docker + GHCR deploy with Watchtower
 
@@ -30,10 +31,12 @@ Telegram bot for sharing files with channel membership verification, pack downlo
     │   ├── channelIntake.js       # Route channel/supergroup file posts
     │   ├── channelSetup.js        # Startup channel checks
     │   ├── channelDiagnostics.js
-    │   ├── databaseService.js     # Supabase
+    │   ├── databaseService.js     # Postgres (files + packs)
+    │   ├── postgresClient.js      # DATABASE_URL pool
+    │   ├── scheduleDatabaseService.js  # Supabase (schedule only)
     │   ├── fileHandlerService.js  # Files, packs, captions, archive copy
     │   ├── membershipService.js
-    │   └── supabaseClient.js
+    │   └── supabaseClient.js      # Schedule DB (optional)
     ├── scripts/                   # One-off migrations (Mongo → Supabase)
     └── utils/
         ├── botReply.js
@@ -45,20 +48,39 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 ## Setup
 
 1. `npm install`
-2. Copy `.env.example` → `.env` and fill values (see `deploy/.env.example` for production)
-3. Run SQL in Supabase: `supabase/files_schema.sql`, then `supabase/schedule_schema.sql` (+ v3–v5 migrations if upgrading)
-4. `npm start`
+2. Copy `deploy/.env.example` → `deploy/.env` and fill values
+3. Apply `scripts/sql/bot_files_columns.sql` on main Postgres (if not done during merge)
+4. Apply `supabase/bot_settings_schema.sql` on main Postgres (runtime toggles for `/mirroring`)
+5. For schedule: run SQL in Supabase (`supabase/schedule_schema.sql`, …)
+6. `npm install && npm start`
 
 ### Main env vars
 
 | Variable | Purpose |
 |----------|---------|
 | `BOT_TOKEN` | Telegram bot token |
+| `DATABASE_URL` | **Main Postgres** — files, packs (same DB as shiori-api) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | **Optional** — schedule features only |
 | `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
 | `LINKS_CHANNEL_ID` | Archive upload channel (copied into private) |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Database |
+| `ARCHIVE_MIRROR_ENABLED` | Default archive → private copy on boot (`true`/`false`; override with `/mirroring`) |
 | `PUBLIC_*` / `ADDITIONAL_*` | Membership channels |
 | `PACK_FILE_DELETE_MS` | Pack file auto-delete delay (default `120000`) |
+
+### Migrating from Supabase file storage
+
+1. Merge historical data into main Postgres (one-off SQL or `npm run merge:supabase-to-main`)
+2. Set `DATABASE_URL` in `deploy/.env` (reachable from tel-bot container — not `localhost` if Postgres is in another container)
+3. Redeploy tel-bot
+4. Optional: run `merge:supabase-to-main` once more to catch stragglers written during cutover
+
+Example `DATABASE_URL` when Postgres runs in Docker on the same host as tel-bot:
+
+```env
+DATABASE_URL=postgresql://shiori:PASSWORD@172.17.0.1:5432/shiori
+```
+
+Or join both containers to the same Docker network and use hostname `shiori-postgres`.
 
 ### Premium custom emoji
 

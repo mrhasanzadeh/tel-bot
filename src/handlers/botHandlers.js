@@ -2,6 +2,7 @@ const membershipService = require('../services/membershipService');
 const fileHandlerService = require('../services/fileHandlerService');
 const { route: routeChannelFile } = require('../services/channelIntake');
 const { buildChannelStatusReport } = require('../services/channelDiagnostics');
+const { buildSecurityReport, ensurePollingMode } = require('../services/botSecurity');
 const {
     isMonitoredChannelChat,
     getArchiveChannelId,
@@ -12,6 +13,7 @@ const {
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 const scheduleService = require('../services/scheduleService');
+const archiveMirrorService = require('../services/archiveMirrorService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -225,6 +227,124 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('checkchannels error:', error);
             await ctx.reply('خطا در بررسی کانال‌ها.');
+        }
+    });
+
+    bot.command('mirroring', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+
+        const parts = String(ctx.message?.text ?? '')
+            .trim()
+            .split(/\s+/);
+        const action = (parts[1] || 'status').toLowerCase();
+
+        const statusWord = (enabled) => (enabled ? 'فعال' : 'غیرفعال');
+
+        try {
+            if (action === 'on' || action === 'enable') {
+                await archiveMirrorService.setEnabled(true);
+                await botReply.reply(
+                    ctx,
+                    `${e('success')} <b>کپی خودکار فعال شد</b>\n\n` +
+                        `${e('download')} فایل‌های جدید کانال <b>آرشیو</b> دوباره به کانال <b>لینک</b> کپی می‌شوند.\n` +
+                        `${e('check')} برای بررسی وضعیت: <code>/mirroring status</code>`
+                );
+                return;
+            }
+
+            if (action === 'off' || action === 'disable') {
+                await archiveMirrorService.setEnabled(false);
+                await botReply.reply(
+                    ctx,
+                    `${e('stop')} <b>کپی خودکار غیرفعال شد</b>\n\n` +
+                        `${e('info')} پست‌های کانال آرشیو دیگر کپی نمی‌شوند.\n` +
+                        `${e('check')} پست <b>مستقیم</b> در کانال لینک همچنان ثبت می‌شود.`
+                );
+                return;
+            }
+
+            if (action === 'reset') {
+                await archiveMirrorService.resetToEnvDefault();
+                const status = await archiveMirrorService.getStatus();
+                await botReply.reply(
+                    ctx,
+                    `${e('success')} <b>تنظیم ادمین بازنشانی شد</b>\n\n` +
+                        `${e('clipboard')} وضعیت فعلی: <b>${statusWord(status.enabled)}</b> (از .env)\n` +
+                        `${e('info')} پیش‌فرض .env: <b>${statusWord(status.envDefault)}</b>`
+                );
+                return;
+            }
+
+            if (action !== 'status') {
+                await botReply.reply(
+                    ctx,
+                    `${e('clipboard')} <b>راهنمای mirroring</b>\n\n` +
+                        `<code>/mirroring status</code> — ${e('search')} وضعیت فعلی\n` +
+                        `<code>/mirroring on</code> — ${e('success')} فعال‌سازی کپی\n` +
+                        `<code>/mirroring off</code> — ${e('stop')} غیرفعال‌سازی کپی\n` +
+                        `<code>/mirroring reset</code> — ${e('cool')} بازگشت به .env`
+                );
+                return;
+            }
+
+            const status = await archiveMirrorService.getStatus();
+            const sourceLabel =
+                status.source === 'admin'
+                    ? `${e('bot')} تنظیم ادمین`
+                    : `${e('clipboard')} فایل .env`;
+
+            await botReply.reply(
+                ctx,
+                `${e('download')} <b>کپی آرشیو → کانال لینک</b>\n\n` +
+                    `${e('info')} وضعیت: <b>${statusWord(status.enabled)}</b>\n` +
+                    `منبع فعلی: ${sourceLabel}\n` +
+                    `${e('timer')} پیش‌فرض .env: <b>${statusWord(status.envDefault)}</b>\n\n` +
+                    `${e('megaphone')} <code>/mirroring off</code> · <code>/mirroring on</code>`
+            );
+        } catch (error) {
+            console.error('mirroring command error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا در تغییر وضعیت mirroring.`);
+        }
+    });
+
+    bot.command('security', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+        try {
+            const report = await buildSecurityReport(bot);
+            await ctx.reply(report);
+        } catch (error) {
+            console.error('security error:', error);
+            await ctx.reply('خطا در بررسی امنیت بات.');
+        }
+    });
+
+    bot.command('clearchwebhook', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+        try {
+            const result = await ensurePollingMode(bot);
+            if (result.hadWebhook) {
+                await ctx.reply(
+                    `${e('warning')} webhook حذف شد.\nURL قبلی:\n${result.previousUrl}\n\n` +
+                        'اگر دوباره برگشت، توکن را در @BotFather revoke کنید.'
+                );
+            } else {
+                await ctx.reply(`${e('success')} webhook تنظیم نشده — polling فعال است.`);
+            }
+        } catch (error) {
+            console.error('clearchwebhook error:', error);
+            await ctx.reply('خطا در حذف webhook.');
         }
     });
 

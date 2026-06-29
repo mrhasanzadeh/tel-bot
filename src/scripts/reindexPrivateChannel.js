@@ -19,7 +19,7 @@ if (process.env.ALLOW_INSECURE_TLS === '1') {
 }
 
 const { Telegraf } = require('telegraf');
-const supabase = require('../services/supabaseClient');
+const databaseService = require('../services/databaseService');
 
 const CHANNEL_ID = process.env.REINDEX_CHANNEL_ID || process.env.PRIVATE_CHANNEL_ID;
 const ADMIN_ID = process.env.ADMIN_USER_ID;
@@ -167,20 +167,16 @@ async function main() {
             if (!file || !key) {
                 skipped++;
             } else if (!DRY_RUN) {
-                const { error } = await supabase.from('files').upsert(
-                    {
-                        key,
-                        message_id: msgId,
-                        type: file.type,
-                        file_id: file.file_id,
-                        file_name: file.file_name,
-                        file_size: file.file_size,
-                        caption: caption || null,
-                        is_active: true
-                    },
-                    { onConflict: 'key' }
-                );
-                if (error) throw error;
+                await databaseService.connect();
+                await databaseService.upsertFile({
+                    key,
+                    messageId: msgId,
+                    type: file.type,
+                    fileId: file.file_id,
+                    fileName: file.file_name,
+                    fileSize: file.file_size,
+                    caption: caption || null,
+                });
                 restored++;
             } else {
                 restored++;

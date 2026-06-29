@@ -1,152 +1,130 @@
-const supabase = require('./supabaseClient');
+const pg = require('./postgresClient');
 
 /**
- * Service for database operations
- * @class DatabaseService
+ * File + pack persistence on the main Postgres (shared with shiori-api).
  */
 class DatabaseService {
-
-    /**
-     * Create a new database service instance
-     */
     constructor() {
         if (DatabaseService.instance) {
             return DatabaseService.instance;
         }
         DatabaseService.instance = this;
         this.isConnected = false;
-        this.tableName = 'files';
     }
 
-    /**
-     * Connect to database
-     * @returns {Promise<void>}
-     * @throws {Error} If connection fails
-     */
     async connect() {
-        try {
-            if (this.isConnected) {
-                return;
-            }
+        if (this.isConnected) return;
 
-            const { error } = await supabase
-                .from(this.tableName)
-                .select('key', { head: true, count: 'exact' })
-                .limit(1);
-
-            if (error) {
-                throw error;
-            }
-
-            console.log('✅ Successfully connected to Supabase');
-            this.isConnected = true;
-        } catch (error) {
-            throw error;
-        }
+        await pg.query('SELECT key FROM files LIMIT 1');
+        console.log('✅ Successfully connected to Postgres (files)');
+        this.isConnected = true;
     }
 
-    /**
-     * Ensure database connection is active
-     * @private
-     * @returns {Promise<void>}
-     */
     async _ensureConnection() {
         if (!this.isConnected) {
-            console.log('🔄 Connecting to Supabase...');
+            console.log('🔄 Connecting to Postgres...');
             await this.connect();
         }
-    }
-
-    _toDb(fileData) {
-        return {
-            key: fileData.key,
-            message_id: fileData.messageId,
-            type: fileData.type,
-            file_id: fileData.fileId,
-            file_name: fileData.fileName,
-            file_size: fileData.fileSize,
-            caption: fileData.caption,
-            downloads: fileData.downloads,
-            last_accessed: fileData.lastAccessed,
-            is_active: fileData.isActive
-        };
     }
 
     _fromDb(row) {
         if (!row) return null;
         return {
             key: row.key,
-            messageId: row.message_id,
-            type: row.type,
-            fileId: row.file_id,
-            fileName: row.file_name,
-            fileSize: row.file_size,
-            caption: row.caption,
+            messageId: row.message_id != null ? Number(row.message_id) : null,
+            type: row.type ?? null,
+            fileId: row.file_id ?? null,
+            fileName: row.file_name ?? null,
+            fileSize: row.file_size != null ? Number(row.file_size) : null,
+            caption: row.caption ?? null,
             date: row.created_at ? new Date(row.created_at) : undefined,
             downloads: row.downloads ?? 0,
             lastAccessed: row.last_accessed ? new Date(row.last_accessed) : undefined,
-            isActive: row.is_active ?? true
+            isActive: row.is_active ?? true,
         };
     }
 
-    /**
-     * Create a new file record
-     * @param {Object} fileData - The file data
-     * @returns {Promise<Object>} Created file object
-     * @throws {Error} If file creation fails
-     */
-    async createFile(fileData) {
-        try {
-            await this._ensureConnection();
-
-            const insertData = this._toDb(fileData);
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .insert(insertData)
-                .select('*')
-                .single();
-
-            if (error) {
-                throw error;
-            }
-
-            console.log(`✅ File saved with key: ${fileData.key}`);
-            return this._fromDb(data);
-        } catch (error) {
-            console.error('❌ Error saving file:', error);
-            throw error;
+    _createdAtValue(fileData) {
+        if (fileData?.date != null) {
+            const d = new Date(fileData.date);
+            if (!Number.isNaN(d.getTime())) return d;
         }
+        return new Date();
     }
 
-    /**
-     * Get file by its unique key
-     * @param {string} key - The file key
-     * @returns {Promise<Object|null>} File object or null if not found
-     * @throws {Error} If database query fails
-     */
+    async createFile(fileData) {
+        await this._ensureConnection();
+
+        const { rows } = await pg.query(
+            `INSERT INTO files (
+                key, message_id, type, file_id, file_name, file_size, caption,
+                downloads, last_accessed, is_active, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *`,
+            [
+                fileData.key,
+                fileData.messageId,
+                fileData.type,
+                fileData.fileId,
+                fileData.fileName ?? null,
+                fileData.fileSize ?? null,
+                fileData.caption ?? null,
+                fileData.downloads ?? 0,
+                fileData.lastAccessed ?? null,
+                fileData.isActive !== false,
+                this._createdAtValue(fileData),
+            ]
+        );
+
+        console.log(`✅ File saved with key: ${fileData.key}`);
+        return this._fromDb(rows[0]);
+    }
+
+    async upsertFile(fileData) {
+        await this._ensureConnection();
+
+        const { rows } = await pg.query(
+            `INSERT INTO files (
+                key, message_id, type, file_id, file_name, file_size, caption, is_active, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
+            ON CONFLICT (key) DO UPDATE SET
+                message_id = EXCLUDED.message_id,
+                type = EXCLUDED.type,
+                file_id = EXCLUDED.file_id,
+                file_name = EXCLUDED.file_name,
+                file_size = EXCLUDED.file_size,
+                caption = EXCLUDED.caption,
+                is_active = true
+            RETURNING *`,
+            [
+                fileData.key,
+                fileData.messageId,
+                fileData.type,
+                fileData.fileId,
+                fileData.fileName ?? null,
+                fileData.fileSize ?? null,
+                fileData.caption ?? null,
+                this._createdAtValue(fileData),
+            ]
+        );
+
+        return this._fromDb(rows[0]);
+    }
+
     async getFileByKey(key) {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .select('*')
-                .eq('key', key)
-                .eq('is_active', true)
-                .maybeSingle();
+        const { rows } = await pg.query(
+            `SELECT * FROM files WHERE key = $1 AND is_active = true LIMIT 1`,
+            [key]
+        );
 
-            if (error) {
-                throw error;
-            }
-
-            if (!data) {
-                console.log(`⚠️ File not found with key: ${key}`);
-            }
-            return this._fromDb(data);
-        } catch (error) {
-            console.error(`❌ Error getting file with key ${key}:`, error);
-            throw error;
+        if (rows.length === 0) {
+            console.log(`⚠️ File not found with key: ${key}`);
+            return null;
         }
+
+        return this._fromDb(rows[0]);
     }
 
     async getFilePackBySlug(slug) {
@@ -155,14 +133,15 @@ class DatabaseService {
         const cleanSlug = String(slug ?? '').trim().toLowerCase();
         if (!cleanSlug) return null;
 
-        const { data, error } = await supabase
-            .from('file_packs')
-            .select('id, slug, title, description, is_active, created_at')
-            .eq('slug', cleanSlug)
-            .maybeSingle();
+        const { rows } = await pg.query(
+            `SELECT id, slug, title, description, is_active, created_at
+             FROM file_packs WHERE slug = $1 LIMIT 1`,
+            [cleanSlug]
+        );
 
-        if (error) throw error;
+        const data = rows[0];
         if (!data) return null;
+
         return {
             id: String(data.id),
             slug: String(data.slug),
@@ -179,228 +158,151 @@ class DatabaseService {
         const cleanId = String(packId ?? '').trim();
         if (!cleanId) return [];
 
-        const { data, error } = await supabase
-            .from('file_pack_items')
-            .select('pack_id, file_key, sort_order')
-            .eq('pack_id', cleanId)
-            .order('sort_order', { ascending: true });
+        const { rows } = await pg.query(
+            `SELECT pack_id, file_key, sort_order
+             FROM file_pack_items
+             WHERE pack_id = $1
+             ORDER BY sort_order ASC`,
+            [cleanId]
+        );
 
-        if (error) throw error;
-
-        return (data || []).map((row) => ({
+        return rows.map((row) => ({
             packId: String(row.pack_id),
             fileKey: String(row.file_key),
             sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order ?? 0) || 0,
         }));
     }
 
-    /**
-     * Increment download count for a file
-     * @param {string} key - The file key
-     * @returns {Promise<Object|null>} Updated file or null if not found
-     * @throws {Error} If update fails
-     */
     async incrementFileDownloads(key) {
+        await this._ensureConnection();
+
         try {
-            await this._ensureConnection();
-
-            const { data: rpcData, error: rpcError } = await supabase
-                .rpc('increment_file_downloads', { p_key: key })
-                .maybeSingle();
-
-            if (!rpcError && rpcData) {
-                return this._fromDb(rpcData);
+            const { rows } = await pg.query(`SELECT * FROM increment_file_downloads($1)`, [key]);
+            if (rows[0]) {
+                console.log(`✅ Downloads incremented for file with key ${key}`);
+                return this._fromDb(rows[0]);
             }
-
-            const existing = await this.getFileByKey(key);
-            if (!existing) {
-                console.log(`⚠️ File not found for download increment: ${key}`);
-                return null;
+        } catch (err) {
+            if (err.code !== '42883') {
+                throw err;
             }
-
-            const nextDownloads = (existing.downloads || 0) + 1;
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .update({
-                    downloads: nextDownloads,
-                    last_accessed: new Date().toISOString()
-                })
-                .eq('key', key)
-                .eq('is_active', true)
-                .select('*')
-                .single();
-
-            if (error) {
-                throw error;
-            }
-
-            console.log(`✅ Downloads incremented for file with key ${key} to ${nextDownloads}`);
-            return this._fromDb(data);
-        } catch (error) {
-            console.error(`❌ Error incrementing downloads for file with key ${key}:`, error);
-            throw error;
         }
+
+        const existing = await this.getFileByKey(key);
+        if (!existing) {
+            console.log(`⚠️ File not found for download increment: ${key}`);
+            return null;
+        }
+
+        const nextDownloads = (existing.downloads || 0) + 1;
+        const { rows } = await pg.query(
+            `UPDATE files
+             SET downloads = $2, last_accessed = now()
+             WHERE key = $1 AND is_active = true
+             RETURNING *`,
+            [key, nextDownloads]
+        );
+
+        console.log(`✅ Downloads incremented for file with key ${key} to ${nextDownloads}`);
+        return this._fromDb(rows[0]);
     }
 
-    /**
-     * Get paginated list of active files
-     * @param {number} [limit=10] - Maximum number of files to return
-     * @param {number} [skip=0] - Number of files to skip
-     * @returns {Promise<Array>} Array of file objects
-     * @throws {Error} If query fails
-     */
     async getAllFiles(limit = 10, skip = 0) {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .select('*')
-                .eq('is_active', true)
-                .order('created_at', { ascending: false })
-                .range(skip, skip + limit - 1);
+        const { rows } = await pg.query(
+            `SELECT * FROM files
+             WHERE is_active = true
+             ORDER BY created_at DESC NULLS LAST
+             LIMIT $1 OFFSET $2`,
+            [limit, skip]
+        );
 
-            if (error) {
-                throw error;
-            }
-
-            return (data || []).map(row => this._fromDb(row));
-        } catch (error) {
-            console.error('❌ Error getting all files:', error);
-            throw error;
-        }
+        return rows.map((row) => this._fromDb(row));
     }
 
-    /**
-     * Mark a file as inactive (soft delete)
-     * @param {string} key - The file key
-     * @returns {Promise<Object|null>} Updated file or null if not found
-     * @throws {Error} If update fails
-     */
     async deactivateFile(key) {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .update({
-                    is_active: false,
-                    last_accessed: new Date().toISOString()
-                })
-                .eq('key', key)
-                .select('*')
-                .maybeSingle();
+        const { rows } = await pg.query(
+            `UPDATE files
+             SET is_active = false, last_accessed = now()
+             WHERE key = $1
+             RETURNING *`,
+            [key]
+        );
 
-            if (error) {
-                throw error;
-            }
-
-            console.log(`✅ File deactivated: ${key}`);
-            return this._fromDb(data);
-        } catch (error) {
-            console.error('❌ Error deactivating file:', error);
-            throw error;
-        }
+        console.log(`✅ File deactivated: ${key}`);
+        return this._fromDb(rows[0]);
     }
 
-    /**
-     * Get statistics about files in the database
-     * @returns {Promise<Object>} Statistics object
-     * @throws {Error} If aggregation fails
-     */
     async getFileStats() {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .select('downloads, file_size')
-                .eq('is_active', true);
+        const { rows } = await pg.query(
+            `SELECT downloads, file_size FROM files WHERE is_active = true`
+        );
 
-            if (error) {
-                throw error;
-            }
+        const totalFiles = rows.length;
+        const totalDownloads = rows.reduce((sum, r) => sum + (r.downloads || 0), 0);
+        const totalSize = rows.reduce((sum, r) => sum + Number(r.file_size || 0), 0);
+        const averageDownloads = totalFiles > 0 ? totalDownloads / totalFiles : 0;
 
-            const rows = data || [];
-            const totalFiles = rows.length;
-            const totalDownloads = rows.reduce((sum, r) => sum + (r.downloads || 0), 0);
-            const totalSize = rows.reduce((sum, r) => sum + (r.file_size || 0), 0);
-            const averageDownloads = totalFiles > 0 ? totalDownloads / totalFiles : 0;
-
-            return {
-                totalFiles,
-                totalDownloads,
-                totalSize,
-                averageDownloads
-            };
-        } catch (error) {
-            console.error('❌ Error getting file stats:', error);
-            throw error;
-        }
+        return {
+            totalFiles,
+            totalDownloads,
+            totalSize,
+            averageDownloads,
+        };
     }
 
-    /**
-     * Deactivate files by their message ID
-     * @param {number} messageId - The Telegram message ID
-     * @returns {Promise<number>} Number of deactivated files
-     * @throws {Error} If update fails
-     */
     async deactivateFilesByMessageId(messageId) {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const { error, count } = await supabase
-                .from(this.tableName)
-                .update({
-                    is_active: false,
-                    last_accessed: new Date().toISOString()
-                }, { count: 'exact' })
-                .eq('message_id', messageId)
-                .eq('is_active', true);
+        const { rowCount } = await pg.query(
+            `UPDATE files
+             SET is_active = false, last_accessed = now()
+             WHERE message_id = $1 AND is_active = true`,
+            [messageId]
+        );
 
-            if (error) {
-                throw error;
-            }
-
-            return count || 0;
-        } catch (error) {
-            console.error(`❌ Error deactivating files for message ID ${messageId}:`, error);
-            throw error;
-        }
+        return rowCount || 0;
     }
 
-    /**
-     * Update a file record by messageId
-     * @param {number} messageId - Telegram message ID
-     * @param {Object} updateData - Fields to update
-     * @returns {Promise<Object>} Update result
-     */
     async updateFileByMessageId(messageId, updateData) {
-        try {
-            await this._ensureConnection();
+        await this._ensureConnection();
 
-            const patch = {};
-            if (updateData.fileId !== undefined) patch.file_id = updateData.fileId;
-            if (updateData.fileName !== undefined) patch.file_name = updateData.fileName;
-            if (updateData.fileSize !== undefined) patch.file_size = updateData.fileSize;
-            if (updateData.caption !== undefined) patch.caption = updateData.caption;
+        const sets = [];
+        const values = [messageId];
+        let idx = 2;
 
-            const { error, count } = await supabase
-                .from(this.tableName)
-                .update(patch, { count: 'exact' })
-                .eq('message_id', messageId);
-
-            if (error) {
-                throw error;
-            }
-
-            return {
-                nModified: count || 0
-            };
-        } catch (error) {
-            console.error(`❌ Error updating file for message ID ${messageId}:`, error);
-            throw error;
+        if (updateData.fileId !== undefined) {
+            sets.push(`file_id = $${idx++}`);
+            values.push(updateData.fileId);
         }
+        if (updateData.fileName !== undefined) {
+            sets.push(`file_name = $${idx++}`);
+            values.push(updateData.fileName);
+        }
+        if (updateData.fileSize !== undefined) {
+            sets.push(`file_size = $${idx++}`);
+            values.push(updateData.fileSize);
+        }
+        if (updateData.caption !== undefined) {
+            sets.push(`caption = $${idx++}`);
+            values.push(updateData.caption);
+        }
+
+        if (sets.length === 0) {
+            return { nModified: 0 };
+        }
+
+        const { rowCount } = await pg.query(
+            `UPDATE files SET ${sets.join(', ')} WHERE message_id = $1`,
+            values
+        );
+
+        return { nModified: rowCount || 0 };
     }
 }
 

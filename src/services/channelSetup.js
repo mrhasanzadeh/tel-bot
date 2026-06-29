@@ -5,6 +5,7 @@ const {
     getPublicPostsChannelId,
     isScheduleTestMode
 } = require('../utils/channelIds');
+const archiveMirrorService = require('./archiveMirrorService');
 
 /**
  * @param {import('telegraf').Telegraf} bot
@@ -28,6 +29,11 @@ async function logChannelSetup(bot) {
 
     if (!archiveId) {
         console.warn('⚠️ LINKS_CHANNEL_ID is not set — archive → private copy is disabled');
+    } else {
+        const mirrorStatus = await archiveMirrorService.getStatus();
+        console.log(
+            `   ARCHIVE MIRROR       ${mirrorStatus.enabled ? 'enabled' : 'disabled'} (source=${mirrorStatus.source})`
+        );
     }
 
     const botId = bot.botInfo?.id;
