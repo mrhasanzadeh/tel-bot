@@ -5,22 +5,12 @@
  */
 
 /**
+ * Telegram entity offset/length are measured in UTF-16 code units — same as JS string.length.
  * @param {string} str
  * @returns {number}
  */
 function utf16Length(str) {
-    let count = 0;
-    for (let i = 0; i < str.length; i++) {
-        const code = str.charCodeAt(i);
-        if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
-            const next = str.charCodeAt(i + 1);
-            if (next >= 0xdc00 && next <= 0xdfff) {
-                i++;
-            }
-        }
-        count++;
-    }
-    return count;
+    return String(str ?? '').length;
 }
 
 /**
