@@ -210,28 +210,35 @@ class FileHandlerService {
             }
             
             console.log('📤 Sending file to user...');
-            
+
+            let forwardedMessage;
+            let noticeMessage;
             try {
-                // Forward file without caption
-                const forwardedMessage = await ctx.telegram.copyMessage(
+                forwardedMessage = await ctx.telegram.copyMessage(
                     ctx.chat.id,
                     config.PRIVATE_CHANNEL_ID,
                     fileData.messageId,
                     { caption: '' }
                 );
                 console.log('✅ File sent successfully');
-                
-                // Send deletion notice as a new message
-                const noticeMessage = await botReply.reply(
+
+                noticeMessage = await botReply.reply(
                     ctx,
                     `${e('timer')} فایل‌های ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n${e('success')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
                 );
-                
-                // Update download statistics
+            } catch (error) {
+                console.error('❌ Error copying message:', error);
+                await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
+                return false;
+            }
+
+            try {
                 await databaseService.incrementFileDownloads(fileKey);
-                
-                // Delete messages after 30 seconds
-                setTimeout(async () => {
+            } catch (err) {
+                console.error('⚠️ Failed to increment downloads:', err);
+            }
+
+            setTimeout(async () => {
                     try {
                         console.log('🔄 Attempting to delete bot messages...');
                         console.log(`Chat ID: ${ctx.chat.id}`);
@@ -263,13 +270,8 @@ class FileHandlerService {
                         console.error('Error details:', error.response || error);
                     }
                 }, 30000);
-                
-                return true;
-            } catch (error) {
-                console.error('❌ Error copying message:', error);
-                await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
-                return false;
-            }
+
+            return true;
         } catch (error) {
             console.error('❌ Error in sendFileToUser:', error);
             await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
@@ -373,7 +375,11 @@ class FileHandlerService {
                         sent += 1;
                         filesToDelete.push(forwardedMessage.message_id);
 
-                        await databaseService.incrementFileDownloads(fileKey);
+                        try {
+                            await databaseService.incrementFileDownloads(fileKey);
+                        } catch (incrErr) {
+                            console.error('⚠️ Failed to increment pack file downloads:', incrErr);
+                        }
 
                         await delayCancellable(1200, cancelToken);
                     } catch (err) {
