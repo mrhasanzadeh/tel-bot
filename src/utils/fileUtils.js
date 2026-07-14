@@ -66,10 +66,35 @@ function extractFileKeyFromCaption(caption) {
     return null;
 }
 
+/**
+ * @param {string | null | undefined} fileName
+ * @returns {string}
+ */
+function getFileExtension(fileName) {
+    const match = String(fileName ?? '').match(/\.([a-z0-9]+)$/i);
+    return match ? match[1].toLowerCase() : '';
+}
+
+/**
+ * Broad media category used to block accidental cross-type DB overwrites.
+ * @param {string | null | undefined} fileName
+ * @returns {'subtitle' | 'video' | 'audio' | 'image' | 'unknown'}
+ */
+function getMediaKind(fileName) {
+    const ext = getFileExtension(fileName);
+    if (['zip', 'rar', '7z', 'ass', 'srt', 'ssa', 'sub'].includes(ext)) return 'subtitle';
+    if (['mkv', 'mp4', 'avi', 'mov', 'webm', 'm4v'].includes(ext)) return 'video';
+    if (['mp3', 'flac', 'aac', 'ogg', 'opus', 'm4a'].includes(ext)) return 'audio';
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return 'image';
+    return ext ? 'unknown' : 'unknown';
+}
+
 module.exports = {
     formatFileSize,
     generateFileKey,
     delay,
     delayCancellable,
-    extractFileKeyFromCaption
+    extractFileKeyFromCaption,
+    getFileExtension,
+    getMediaKind
 }; 

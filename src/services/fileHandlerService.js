@@ -1,7 +1,7 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
 const { getPrivateChannelId, getArchiveChannelId } = require('../utils/channelIds');
-const { generateFileKey, delay, delayCancellable, formatFileSize, extractFileKeyFromCaption } = require('../utils/fileUtils');
+const { generateFileKey, delay, delayCancellable, formatFileSize, extractFileKeyFromCaption, getMediaKind } = require('../utils/fileUtils');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 const scheduleService = require('./scheduleService');
@@ -207,10 +207,18 @@ class FileHandlerService {
     }
 
     /**
-     * Sync DB metadata after edit/replace — never copies between channels.
+     * Sync DB metadata after edit/replace in the links storage channel only.
+     * Archive edits are ignored — message_id is per-chat and must not touch delivery records.
      * @private
      */
     async _syncEditedFileMetadata(message, channelLabel) {
+        if (channelLabel !== 'Links') {
+            console.log(
+                `ℹ️ Ignoring ${channelLabel} edit msg=${message.message_id} (DB sync only from links channel).`
+            );
+            return;
+        }
+
         const messageId = message.message_id;
         const updateData = this._extractMediaUpdateData(message);
         if (!updateData) {
@@ -235,9 +243,18 @@ class FileHandlerService {
         }
 
         const existing = await databaseService.getFileByKey(fileKey);
-        const deliveryMessageId = existing?.messageId ?? messageId;
+        if (existing) {
+            const oldKind = getMediaKind(existing.fileName);
+            const newKind = getMediaKind(updateData.fileName);
+            if (oldKind !== 'unknown' && newKind !== 'unknown' && oldKind !== newKind) {
+                console.warn(
+                    `⚠️ Refusing to overwrite key ${fileKey}: ${oldKind} (${existing.fileName}) → ${newKind} (${updateData.fileName})`
+                );
+                return;
+            }
+        }
 
-        await this._syncFileRecordByKey(fileKey, updateData, deliveryMessageId);
+        await this._syncFileRecordByKey(fileKey, updateData, messageId);
     }
 
     /**
@@ -337,8 +354,16 @@ class FileHandlerService {
                     `${e('timer')} فایل‌های ارسالی ربات به دلیل مسائل مشخص، بعد از 30 ثانیه از ربات پاک می‌شوند.\n\n${e('success')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
                 );
             } catch (error) {
-                console.error('❌ Error copying message:', error);
-                await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
+                const desc = String(error?.response?.description || error?.message || '').toLowerCase();
+                console.error('❌ Error copying message:', error?.response?.description || error);
+                if (desc.includes('not found') || desc.includes("can't be found")) {
+                    await botReply.reply(
+                        ctx,
+                        `${e('warning')} فایل در کانال ذخیره‌سازی پیدا نشد (message_id نامعتبر). لطفاً با ادمین تماس بگیرید.`
+                    );
+                } else {
+                    await botReply.reply(ctx, `${e('warning')} خطا در ارسال فایل. لطفاً دوباره تلاش کنید.`);
+                }
                 return false;
             }
 

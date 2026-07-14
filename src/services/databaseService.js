@@ -96,22 +96,6 @@ class DatabaseService {
         const mid = String(messageId ?? '').trim();
         if (!mid) return null;
 
-        const res = await api.get(
-            `/bot/files/by-message/${encodeURIComponent(mid)}`
-        );
-        if (!res?.data) {
-            return null;
-        }
-
-        return this._fromApi(res.data);
-    }
-
-    async getFileByMessageId(messageId) {
-        await this._ensureConnection();
-
-        const mid = String(messageId ?? '').trim();
-        if (!mid) return null;
-
         try {
             const res = await api.get(`/bot/files/by-message/${encodeURIComponent(mid)}`);
             return res?.data ? this._fromApi(res.data) : null;
