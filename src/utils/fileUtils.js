@@ -54,13 +54,13 @@ function extractFileKeyFromCaption(caption) {
     const text = String(caption ?? '').trim();
     if (!text) return null;
 
-    const keyLine = text.match(/(?:🔑\s*)?Key:\s*(\d{6,12})/i);
+    const keyLine = text.match(/(?:🔑\s*)?Key:\s*(\d+)/i);
     if (keyLine?.[1]) return keyLine[1].trim();
 
-    const startMatch = text.match(/[?&]start=get_(\d{6,12})/i);
+    const startMatch = text.match(/[?&]start=get_(\d+)/i);
     if (startMatch?.[1]) return startMatch[1].trim();
 
-    const tokenMatch = text.match(/get_(\d{6,12})/i);
+    const tokenMatch = text.match(/get_(\d+)/i);
     if (tokenMatch?.[1]) return tokenMatch[1].trim();
 
     return null;

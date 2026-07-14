@@ -193,50 +193,68 @@ class FileHandlerService {
     }
 
     /**
-     * Handle an edited file in the private channel
-     * @param {Object} ctx - Telegram context
-     * @returns {Promise<void>}
+     * Resolve file key for sync after channel edit.
+     * @private
+     */
+    async _resolveFileKeyForSync(message, messageId, updateData) {
+        const fromCaption = extractFileKeyFromCaption(updateData.caption);
+        if (fromCaption) return fromCaption;
+
+        const byMessage = await databaseService.getFileByMessageId(messageId);
+        if (byMessage?.key) return byMessage.key;
+
+        return null;
+    }
+
+    /**
+     * Sync DB after a file was edited/replaced in the private links channel.
+     * @param {Object} ctx
+     * @param {Object} message
+     */
+    async handleEditedPrivateChannelPost(ctx, message) {
+        const messageId = message.message_id;
+        const updateData = this._extractMediaUpdateData(message);
+        if (!updateData) {
+            console.log('❌ No file found in edited private message');
+            return;
+        }
+
+        console.log(
+            `✏️ Private edit msg=${messageId} file="${updateData.fileName}" captionKey=${extractFileKeyFromCaption(updateData.caption) ?? '—'}`
+        );
+
+        const updated = await databaseService.updateFileByMessageId(messageId, updateData);
+        if (updated?.nModified > 0) {
+            console.log(`✅ File record for message ${messageId} updated in DB.`);
+            return;
+        }
+
+        const fileKey = await this._resolveFileKeyForSync(message, messageId, updateData);
+        if (!fileKey) {
+            console.log(`⚠️ No file record updated for message ${messageId} (key not found).`);
+            return;
+        }
+
+        await this._syncFileRecordByKey(fileKey, updateData, messageId);
+    }
+
+    /**
+     * @deprecated use handleEditedPrivateChannelPost
      */
     async handleEditedFile(ctx) {
-        try {
-            const message = ctx.editedChannelPost;
-            const messageId = message.message_id;
-            const chatId = ctx.chat.id;
-            if (chatId.toString() !== getPrivateChannelId()) return;
-
-            const updateData = this._extractMediaUpdateData(message);
-            if (!updateData) {
-                console.log('❌ No file found in edited message');
-                return;
-            }
-
-            const updated = await databaseService.updateFileByMessageId(messageId, updateData);
-            if (updated?.nModified > 0) {
-                console.log(`✅ File record for message ${messageId} updated in DB.`);
-                return;
-            }
-
-            const fileKey = extractFileKeyFromCaption(updateData.caption);
-            if (!fileKey) {
-                console.log(`⚠️ No file record updated for message ${messageId} (key not found in caption).`);
-                return;
-            }
-
-            await this._syncFileRecordByKey(fileKey, updateData, messageId);
-        } catch (error) {
-            console.error('❌ Error handling edited file:', error);
-        }
+        const message = ctx.editedChannelPost ?? ctx.editedMessage;
+        if (!message) return;
+        await this.handleEditedPrivateChannelPost(ctx, message);
     }
 
     /**
      * Archive channel edit/replace → re-copy to private channel and sync DB by file key.
-     * @param {Object} ctx - Telegram context
-     * @returns {Promise<void>}
+     * @param {Object} ctx
+     * @param {Object} message
      */
-    async handleEditedArchiveChannelPost(ctx) {
-        const message = ctx.editedChannelPost;
+    async handleEditedArchiveChannelPost(ctx, message) {
         const archiveChannelId = getArchiveChannelId();
-        if (!archiveChannelId || ctx.chat.id.toString() !== archiveChannelId) return;
+        if (!archiveChannelId || String(ctx.chat.id).trim() !== archiveChannelId) return;
 
         const updateData = this._extractMediaUpdateData(message);
         if (!updateData) {
@@ -244,9 +262,16 @@ class FileHandlerService {
             return;
         }
 
-        const fileKey = extractFileKeyFromCaption(updateData.caption);
+        let fileKey = extractFileKeyFromCaption(updateData.caption);
         if (!fileKey) {
-            console.log('❌ Edited archive post has no file key in caption');
+            const byMessage = await databaseService.getFileByMessageId(message.message_id);
+            fileKey = byMessage?.key ?? null;
+        }
+
+        if (!fileKey) {
+            console.log(
+                `❌ Edited archive post msg=${message.message_id} has no file key (caption="${String(updateData.caption).slice(0, 80)}")`
+            );
             return;
         }
 
@@ -257,7 +282,9 @@ class FileHandlerService {
         }
 
         try {
-            console.log(`✏️ Processing edited archive file key=${fileKey} msg=${message.message_id}`);
+            console.log(
+                `✏️ Archive edit key=${fileKey} msg=${message.message_id} file="${updateData.fileName}"`
+            );
 
             const existing = await databaseService.getFileByKey(fileKey);
             let nextMessageId = existing?.messageId ?? null;
@@ -293,6 +320,32 @@ class FileHandlerService {
         } catch (error) {
             console.error('❌ Error handling edited archive channel post:', error);
         }
+    }
+
+    /**
+     * Route edited channel/supergroup file post.
+     * @param {import('telegraf').Context} ctx
+     */
+    async handleEditedChannelIntake(ctx) {
+        const { getEditedChannelPost } = require('../utils/editedChannelPost');
+        const intake = getEditedChannelPost(ctx);
+        if (!intake) return false;
+
+        const { post, chatId } = intake;
+        const archiveId = getArchiveChannelId();
+        const privateId = getPrivateChannelId();
+
+        if (privateId && chatId === privateId) {
+            await this.handleEditedPrivateChannelPost(ctx, post);
+            return true;
+        }
+
+        if (archiveId && chatId === archiveId) {
+            await this.handleEditedArchiveChannelPost(ctx, post);
+            return true;
+        }
+
+        return false;
     }
 
     /**
