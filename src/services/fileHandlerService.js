@@ -1,7 +1,7 @@
 const config = require('../../config');
 const databaseService = require('./databaseService');
-const { getPrivateChannelId } = require('../utils/channelIds');
-const { generateFileKey, delay, delayCancellable, formatFileSize } = require('../utils/fileUtils');
+const { getPrivateChannelId, getArchiveChannelId } = require('../utils/channelIds');
+const { generateFileKey, delay, delayCancellable, formatFileSize, extractFileKeyFromCaption } = require('../utils/fileUtils');
 const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
 const botReply = require('../utils/botReply');
 const scheduleService = require('./scheduleService');
@@ -122,6 +122,77 @@ class FileHandlerService {
     }
 
     /**
+     * @private
+     * @param {Object} message
+     * @returns {{ type: string, fileId: string, fileName: string, fileSize: number, caption: string } | null}
+     */
+    _extractMediaUpdateData(message) {
+        const caption = message.caption || '';
+
+        if (message.document) {
+            return {
+                type: 'document',
+                fileId: message.document.file_id,
+                fileName: message.document.file_name || 'file',
+                fileSize: message.document.file_size || 0,
+                caption
+            };
+        }
+
+        if (message.video) {
+            return {
+                type: 'video',
+                fileId: message.video.file_id,
+                fileName: message.video.file_name || 'video.mp4',
+                fileSize: message.video.file_size || 0,
+                caption
+            };
+        }
+
+        if (message.audio) {
+            return {
+                type: 'audio',
+                fileId: message.audio.file_id,
+                fileName: message.audio.file_name || 'audio.mp3',
+                fileSize: message.audio.file_size || 0,
+                caption
+            };
+        }
+
+        if (message.photo) {
+            const largestPhoto = Array.isArray(message.photo)
+                ? message.photo[message.photo.length - 1]
+                : message.photo;
+            return {
+                type: 'photo',
+                fileId: largestPhoto.file_id,
+                fileName: 'photo.jpg',
+                fileSize: largestPhoto.file_size || 0,
+                caption
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Persist metadata (+ optional message id) for an existing file key.
+     * @private
+     */
+    async _syncFileRecordByKey(fileKey, updateData, messageId) {
+        await databaseService.upsertFile({
+            key: fileKey,
+            messageId: messageId ?? updateData.messageId,
+            type: updateData.type,
+            fileId: updateData.fileId,
+            fileName: updateData.fileName,
+            fileSize: updateData.fileSize,
+            caption: updateData.caption
+        });
+        console.log(`✅ File record for key ${fileKey} synced (${updateData.fileName}).`);
+    }
+
+    /**
      * Handle an edited file in the private channel
      * @param {Object} ctx - Telegram context
      * @returns {Promise<void>}
@@ -133,56 +204,94 @@ class FileHandlerService {
             const chatId = ctx.chat.id;
             if (chatId.toString() !== getPrivateChannelId()) return;
 
-            // Only handle if the message contains a file
-            const file = message.document || message.video || message.audio || message.photo;
-            if (!file) {
+            const updateData = this._extractMediaUpdateData(message);
+            if (!updateData) {
                 console.log('❌ No file found in edited message');
                 return;
             }
 
-            // Prepare update data
-            let updateData = {};
-            if (message.document) {
-                updateData = {
-                    fileId: message.document.file_id,
-                    fileName: message.document.file_name,
-                    fileSize: message.document.file_size,
-                    caption: message.caption || ''
-                };
-            } else if (message.video) {
-                updateData = {
-                    fileId: message.video.file_id,
-                    fileName: 'video.mp4',
-                    fileSize: message.video.file_size,
-                    caption: message.caption || ''
-                };
-            } else if (message.audio) {
-                updateData = {
-                    fileId: message.audio.file_id,
-                    fileName: message.audio.file_name || 'audio.mp3',
-                    fileSize: message.audio.file_size,
-                    caption: message.caption || ''
-                };
-            } else if (message.photo) {
-                // For photo, get the largest size
-                const largestPhoto = Array.isArray(message.photo) ? message.photo[message.photo.length - 1] : message.photo;
-                updateData = {
-                    fileId: largestPhoto.file_id,
-                    fileName: 'photo.jpg',
-                    fileSize: largestPhoto.file_size || 0,
-                    caption: message.caption || ''
-                };
+            const updated = await databaseService.updateFileByMessageId(messageId, updateData);
+            if (updated?.nModified > 0) {
+                console.log(`✅ File record for message ${messageId} updated in DB.`);
+                return;
             }
 
-            // Update the file record in the database
-            const updated = await databaseService.updateFileByMessageId(messageId, updateData);
-            if (updated && updated.nModified > 0) {
-                console.log(`✅ File record for message ${messageId} updated in DB.`);
-            } else {
-                console.log(`⚠️ No file record updated for message ${messageId}.`);
+            const fileKey = extractFileKeyFromCaption(updateData.caption);
+            if (!fileKey) {
+                console.log(`⚠️ No file record updated for message ${messageId} (key not found in caption).`);
+                return;
             }
+
+            await this._syncFileRecordByKey(fileKey, updateData, messageId);
         } catch (error) {
             console.error('❌ Error handling edited file:', error);
+        }
+    }
+
+    /**
+     * Archive channel edit/replace → re-copy to private channel and sync DB by file key.
+     * @param {Object} ctx - Telegram context
+     * @returns {Promise<void>}
+     */
+    async handleEditedArchiveChannelPost(ctx) {
+        const message = ctx.editedChannelPost;
+        const archiveChannelId = getArchiveChannelId();
+        if (!archiveChannelId || ctx.chat.id.toString() !== archiveChannelId) return;
+
+        const updateData = this._extractMediaUpdateData(message);
+        if (!updateData) {
+            console.log('❌ No file found in edited archive message');
+            return;
+        }
+
+        const fileKey = extractFileKeyFromCaption(updateData.caption);
+        if (!fileKey) {
+            console.log('❌ Edited archive post has no file key in caption');
+            return;
+        }
+
+        const privateChannelId = getPrivateChannelId();
+        if (!privateChannelId) {
+            console.error('❌ PRIVATE_CHANNEL_ID is not set');
+            return;
+        }
+
+        try {
+            console.log(`✏️ Processing edited archive file key=${fileKey} msg=${message.message_id}`);
+
+            const existing = await databaseService.getFileByKey(fileKey);
+            let nextMessageId = existing?.messageId ?? null;
+
+            if (existing?.messageId) {
+                try {
+                    await ctx.telegram.deleteMessage(privateChannelId, existing.messageId);
+                } catch (deleteErr) {
+                    console.warn(
+                        `⚠️ Could not delete old private message ${existing.messageId}:`,
+                        deleteErr.message
+                    );
+                }
+            }
+
+            const copied = await ctx.telegram.copyMessage(
+                privateChannelId,
+                ctx.chat.id,
+                message.message_id
+            );
+            const copiedMessageId = typeof copied === 'number' ? copied : copied?.message_id;
+            if (copiedMessageId) {
+                nextMessageId = copiedMessageId;
+                console.log(
+                    `✅ Re-copied edited archive message ${message.message_id} → private ${copiedMessageId}`
+                );
+            } else if (!nextMessageId) {
+                console.error('❌ Could not resolve private channel message id after archive edit');
+                return;
+            }
+
+            await this._syncFileRecordByKey(fileKey, updateData, nextMessageId);
+        } catch (error) {
+            console.error('❌ Error handling edited archive channel post:', error);
         }
     }
 

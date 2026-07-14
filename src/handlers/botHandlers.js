@@ -201,14 +201,25 @@ function setupHandlers(bot) {
         }
     });
 
-    // Handle edited channel posts
+    // Handle edited channel posts (private + archive file replace)
     bot.on('edited_channel_post', async (ctx) => {
         try {
-            const chatId = ctx.chat.id;
-            const messageId = ctx.editedChannelPost.message_id;
-            if (chatId && messageId && chatId.toString() === getPrivateChannelId()) {
+            const chatId = normalizeChatId(ctx.chat?.id);
+            const messageId = ctx.editedChannelPost?.message_id;
+            if (!chatId || !messageId) return;
+
+            const archiveId = getArchiveChannelId();
+            const privateId = getPrivateChannelId();
+
+            if (privateId && chatId === privateId) {
                 console.log('✏️ Processing edited file in private channel');
                 await fileHandlerService.handleEditedFile(ctx);
+                return;
+            }
+
+            if (archiveId && chatId === archiveId) {
+                console.log('✏️ Processing edited file in archive channel');
+                await fileHandlerService.handleEditedArchiveChannelPost(ctx);
             }
         } catch (error) {
             console.error('❌ Error handling edited channel post:', error);

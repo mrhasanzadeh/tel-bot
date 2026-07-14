@@ -45,9 +45,31 @@ async function delayCancellable(ms, cancelToken) {
     }
 }
 
+/**
+ * Extract bot file key from channel caption (Key: … or ?start=get_…).
+ * @param {string | null | undefined} caption
+ * @returns {string | null}
+ */
+function extractFileKeyFromCaption(caption) {
+    const text = String(caption ?? '').trim();
+    if (!text) return null;
+
+    const keyLine = text.match(/(?:🔑\s*)?Key:\s*(\d{6,12})/i);
+    if (keyLine?.[1]) return keyLine[1].trim();
+
+    const startMatch = text.match(/[?&]start=get_(\d{6,12})/i);
+    if (startMatch?.[1]) return startMatch[1].trim();
+
+    const tokenMatch = text.match(/get_(\d{6,12})/i);
+    if (tokenMatch?.[1]) return tokenMatch[1].trim();
+
+    return null;
+}
+
 module.exports = {
     formatFileSize,
     generateFileKey,
     delay,
-    delayCancellable
+    delayCancellable,
+    extractFileKeyFromCaption
 }; 
