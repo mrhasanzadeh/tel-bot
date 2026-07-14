@@ -207,20 +207,19 @@ class FileHandlerService {
     }
 
     /**
-     * Sync DB after a file was edited/replaced in the private links channel.
-     * @param {Object} ctx
-     * @param {Object} message
+     * Sync DB metadata after edit/replace — never copies between channels.
+     * @private
      */
-    async handleEditedPrivateChannelPost(ctx, message) {
+    async _syncEditedFileMetadata(message, channelLabel) {
         const messageId = message.message_id;
         const updateData = this._extractMediaUpdateData(message);
         if (!updateData) {
-            console.log('❌ No file found in edited private message');
+            console.log(`❌ No file found in edited ${channelLabel} message`);
             return;
         }
 
         console.log(
-            `✏️ Private edit msg=${messageId} file="${updateData.fileName}" captionKey=${extractFileKeyFromCaption(updateData.caption) ?? '—'}`
+            `✏️ ${channelLabel} edit msg=${messageId} file="${updateData.fileName}" captionKey=${extractFileKeyFromCaption(updateData.caption) ?? '—'}`
         );
 
         const updated = await databaseService.updateFileByMessageId(messageId, updateData);
@@ -231,11 +230,23 @@ class FileHandlerService {
 
         const fileKey = await this._resolveFileKeyForSync(message, messageId, updateData);
         if (!fileKey) {
-            console.log(`⚠️ No file record updated for message ${messageId} (key not found).`);
+            console.log(`⚠️ No file record updated for ${channelLabel} msg=${messageId} (key not found).`);
             return;
         }
 
-        await this._syncFileRecordByKey(fileKey, updateData, messageId);
+        const existing = await databaseService.getFileByKey(fileKey);
+        const deliveryMessageId = existing?.messageId ?? messageId;
+
+        await this._syncFileRecordByKey(fileKey, updateData, deliveryMessageId);
+    }
+
+    /**
+     * Sync DB after a file was edited/replaced in the private links channel.
+     * @param {Object} ctx
+     * @param {Object} message
+     */
+    async handleEditedPrivateChannelPost(ctx, message) {
+        await this._syncEditedFileMetadata(message, 'Links');
     }
 
     /**
@@ -248,7 +259,7 @@ class FileHandlerService {
     }
 
     /**
-     * Archive channel edit/replace → re-copy to private channel and sync DB by file key.
+     * Archive channel edit/replace → update DB only (no copy to links channel).
      * @param {Object} ctx
      * @param {Object} message
      */
@@ -256,70 +267,7 @@ class FileHandlerService {
         const archiveChannelId = getArchiveChannelId();
         if (!archiveChannelId || String(ctx.chat.id).trim() !== archiveChannelId) return;
 
-        const updateData = this._extractMediaUpdateData(message);
-        if (!updateData) {
-            console.log('❌ No file found in edited archive message');
-            return;
-        }
-
-        let fileKey = extractFileKeyFromCaption(updateData.caption);
-        if (!fileKey) {
-            const byMessage = await databaseService.getFileByMessageId(message.message_id);
-            fileKey = byMessage?.key ?? null;
-        }
-
-        if (!fileKey) {
-            console.log(
-                `❌ Edited archive post msg=${message.message_id} has no file key (caption="${String(updateData.caption).slice(0, 80)}")`
-            );
-            return;
-        }
-
-        const privateChannelId = getPrivateChannelId();
-        if (!privateChannelId) {
-            console.error('❌ PRIVATE_CHANNEL_ID is not set');
-            return;
-        }
-
-        try {
-            console.log(
-                `✏️ Archive edit key=${fileKey} msg=${message.message_id} file="${updateData.fileName}"`
-            );
-
-            const existing = await databaseService.getFileByKey(fileKey);
-            let nextMessageId = existing?.messageId ?? null;
-
-            if (existing?.messageId) {
-                try {
-                    await ctx.telegram.deleteMessage(privateChannelId, existing.messageId);
-                } catch (deleteErr) {
-                    console.warn(
-                        `⚠️ Could not delete old private message ${existing.messageId}:`,
-                        deleteErr.message
-                    );
-                }
-            }
-
-            const copied = await ctx.telegram.copyMessage(
-                privateChannelId,
-                ctx.chat.id,
-                message.message_id
-            );
-            const copiedMessageId = typeof copied === 'number' ? copied : copied?.message_id;
-            if (copiedMessageId) {
-                nextMessageId = copiedMessageId;
-                console.log(
-                    `✅ Re-copied edited archive message ${message.message_id} → private ${copiedMessageId}`
-                );
-            } else if (!nextMessageId) {
-                console.error('❌ Could not resolve private channel message id after archive edit');
-                return;
-            }
-
-            await this._syncFileRecordByKey(fileKey, updateData, nextMessageId);
-        } catch (error) {
-            console.error('❌ Error handling edited archive channel post:', error);
-        }
+        await this._syncEditedFileMetadata(message, 'Archive');
     }
 
     /**
