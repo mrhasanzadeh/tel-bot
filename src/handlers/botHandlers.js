@@ -1,4 +1,6 @@
 const membershipService = require('../services/membershipService');
+const { attributeVerifiedJoins } = require('../services/membershipAttributionService');
+const sponsorCampaignService = require('../services/sponsorCampaignService');
 const fileHandlerService = require('../services/fileHandlerService');
 const { route: routeChannelFile } = require('../services/channelIntake');
 const { buildChannelStatusReport } = require('../services/channelDiagnostics');
@@ -10,7 +12,12 @@ const {
     getAdminUserId,
     normalizeChatId
 } = require('../utils/channelIds');
-const { e, escapeHtml, inlineButton } = require('../utils/premiumEmoji');
+const { e } = require('../utils/premiumEmoji');
+const {
+    createJoinButtons,
+    createMembershipMessage,
+    createWelcomeChannelList
+} = require('../utils/membershipUi');
 const botReply = require('../utils/botReply');
 const scheduleService = require('../services/scheduleService');
 const archiveMirrorService = require('../services/archiveMirrorService');
@@ -182,6 +189,40 @@ function setupHandlers(bot) {
             }
         }
         return next();
+    });
+
+    bot.use(async (ctx, next) => {
+        if (ctx.chat?.type !== 'private') return next();
+
+        const adminId = getAdminUserId();
+        if (adminId && String(ctx.from?.id) === adminId) return next();
+
+        const callbackData = ctx.callbackQuery?.data ?? '';
+        if (callbackData.startsWith('check_membership_')) return next();
+
+        const channels = await sponsorCampaignService.getRequiredChannels();
+        if (!sponsorCampaignService.isGateEnabled(channels)) return next();
+
+        const userId = String(ctx.from?.id ?? '');
+        if (!userId) return next();
+
+        const messageText = ctx.message?.text ?? '';
+        if (messageText.startsWith('/start')) return next();
+
+        const { isAllMember, memberships } = await membershipService.isMember(userId);
+        if (isAllMember) {
+            await attributeVerifiedJoins(userId, memberships);
+            return next();
+        }
+
+        if (ctx.callbackQuery) {
+            await ctx.answerCbQuery('ابتدا در کانال‌های اسپانسر عضو شوید.', { show_alert: true });
+            return;
+        }
+
+        await botReply.reply(ctx, createMembershipMessage(memberships), {
+            reply_markup: createJoinButtons(userId, memberships)
+        });
     });
 
     // Handle deleted messages
@@ -394,7 +435,7 @@ function setupHandlers(bot) {
             }
 
             // Check if user is a member of all channels
-            const { isAllMember, memberships } = await membershipService.isMember(userId);
+            const { isAllMember, memberships, channels } = await membershipService.isMember(userId);
             console.log(`👤 User ${userId} membership status: ${isAllMember}`);
 
             const req = parseRequest(startPayload);
@@ -415,21 +456,21 @@ function setupHandlers(bot) {
                     await botReply.reply(
                         ctx,
                         createMembershipMessage(memberships),
-                        { reply_markup: createJoinButtons(userId) }
+                        { reply_markup: createJoinButtons(userId, memberships) }
                     );
                 }
             } else {
                 if (isAllMember) {
                     await botReply.reply(
                         ctx,
-                        `${e('bot')} به ربات شیوری خوش آمدید.\n\n${e('search')} کانال‌های ما:\n• https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}\n• https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`,
+                        `${e('bot')} به ربات شیوری خوش آمدید.\n\n${e('search')} کانال‌های ما:\n${createWelcomeChannelList(channels)}`,
                         { disable_web_page_preview: true }
                     );
                 } else {
                     await botReply.reply(
                         ctx,
                         createMembershipMessage(memberships),
-                        { reply_markup: createJoinButtons(userId) }
+                        { reply_markup: createJoinButtons(userId, memberships) }
                     );
                 }
             }
@@ -452,6 +493,7 @@ function setupHandlers(bot) {
         const { isAllMember, memberships } = await membershipService.isMember(actorId);
 
         if (isAllMember) {
+            await attributeVerifiedJoins(actorId, memberships);
             await ctx.answerCbQuery();
             await botReply.editMessageText(
                 ctx,
@@ -471,7 +513,7 @@ function setupHandlers(bot) {
         } else {
             await ctx.answerCbQuery();
             const message = createMembershipMessage(memberships);
-            await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(actorId) });
+            await botReply.editMessageText(ctx, message, { reply_markup: createJoinButtons(actorId, memberships) });
         }
     });
 
@@ -542,7 +584,7 @@ function setupHandlers(bot) {
             }
 
             const userId = String(ctx.from.id);
-            const { isAllMember, memberships } = await membershipService.isMember(userId);
+            const { isAllMember, memberships, channels } = await membershipService.isMember(userId);
 
             const req = parseRequest(ctx.message.text);
             if (!req) {
@@ -556,7 +598,7 @@ function setupHandlers(bot) {
                 
                 // Send membership status and join buttons
                 const message = createMembershipMessage(memberships);
-                await botReply.reply(ctx, message, { reply_markup: createJoinButtons(userId) });
+                await botReply.reply(ctx, message, { reply_markup: createJoinButtons(userId, memberships) });
                 return;
             }
 
@@ -571,53 +613,6 @@ function setupHandlers(bot) {
             await botReply.reply(ctx, 'متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید.');
         }
     });
-}
-
-/**
- * Create join buttons for all required channels
- * @returns {Object} Telegram inline keyboard markup
- */
-function createJoinButtons(userId) {
-    return {
-        inline_keyboard: [
-            [
-                inlineButton({
-                    text: 'عضویت در کانال اول',
-                    emojiKey: 'users',
-                    url: `https://t.me/${process.env.PUBLIC_CHANNEL_USERNAME}`
-                }),
-                inlineButton({
-                    text: 'عضویت در کانال دوم',
-                    emojiKey: 'users',
-                    url: `https://t.me/${process.env.ADDITIONAL_CHANNEL_USERNAME}`
-                })
-            ],
-            [
-                inlineButton({
-                    text: 'بررسی عضویت',
-                    emojiKey: 'success',
-                    callback_data: `check_membership_${userId}`
-                })
-            ]
-        ]
-    };
-}
-
-/**
- * Create membership status message
- * @param {Object} memberships - Membership status for each channel
- * @returns {string} Status message
- */
-function createMembershipMessage(memberships) {
-    let message = `${e('megaphone')} وضعیت عضویت شما:\n\n`;
-
-    for (const [, status] of Object.entries(memberships)) {
-        const emoji = status.isMember ? e('success') : e('error');
-        message += `${emoji} ${escapeHtml(status.name)}\n`;
-    }
-
-    message += '\nبرای دریافت فایل، لطفاً در همه کانال‌ها عضو شوید.';
-    return message;
 }
 
 module.exports = {

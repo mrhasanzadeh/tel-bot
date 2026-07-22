@@ -1,11 +1,11 @@
+const sponsorCampaignService = require('./sponsorCampaignService');
+
+const MEMBER_STATUSES = new Set(['member', 'administrator', 'creator']);
+
 /**
- * Service for handling membership checks
- * @class MembershipService
+ * Service for handling membership checks against dynamic sponsor campaigns.
  */
 class MembershipService {
-    /**
-     * Create a new membership service instance
-     */
     constructor() {
         if (MembershipService.instance) {
             return MembershipService.instance;
@@ -15,77 +15,92 @@ class MembershipService {
     }
 
     /**
-     * Set the Telegram bot instance
-     * @param {Object} bot - Telegraf bot instance
+     * @param {import('telegraf').Telegraf} bot
      */
     setTelegram(bot) {
         this.telegram = bot;
     }
 
     /**
-     * Check if a user is a member of the required channel
-     * @param {number} userId - Telegram user ID
-     * @returns {Promise<boolean>} Whether the user is a member
+     * @param {string|number} userId
+     * @returns {Promise<{
+     *   isAllMember: boolean,
+     *   memberships: Record<string, {
+     *     name: string,
+     *     isMember: boolean,
+     *     username: string|null,
+     *     campaignId: string|null,
+     *     channelId: string
+     *   }>,
+     *   channels: Array<Record<string, unknown>>
+     * }>}
      */
     async isMember(userId) {
         try {
             if (!this.telegram) {
                 console.error('❌ Telegram bot instance not set in membership service');
-                return { isAllMember: false, memberships: {} };
+                return { isAllMember: true, memberships: {}, channels: [] };
             }
 
-            if (!process.env.PUBLIC_CHANNEL_ID || !process.env.ADDITIONAL_CHANNEL_ID) {
-                console.error('❌ Channel IDs environment variables are not set');
-                return { isAllMember: false, memberships: {} };
+            const channels = await sponsorCampaignService.getRequiredChannels();
+            if (!sponsorCampaignService.isGateEnabled(channels)) {
+                return { isAllMember: true, memberships: {}, channels: [] };
             }
 
-            console.log(`🔍 Checking membership for user ${userId}`);
-            
-            // Check first channel
-            console.log(`📢 Checking membership in first channel ${process.env.PUBLIC_CHANNEL_ID}`);
-            const chatMember1 = await this.telegram.telegram.getChatMember(
-                process.env.PUBLIC_CHANNEL_ID,
-                userId
-            );
-            const isMember1 = ['member', 'administrator', 'creator'].includes(chatMember1.status);
-            console.log(`👤 User ${userId} first channel status: ${chatMember1.status} (isMember: ${isMember1})`);
+            console.log(`🔍 Checking membership for user ${userId} (${channels.length} channel(s))`);
 
-            // Check second channel
-            console.log(`📢 Checking membership in second channel ${process.env.ADDITIONAL_CHANNEL_ID}`);
-            const chatMember2 = await this.telegram.telegram.getChatMember(
-                process.env.ADDITIONAL_CHANNEL_ID,
-                userId
-            );
-            const isMember2 = ['member', 'administrator', 'creator'].includes(chatMember2.status);
-            console.log(`👤 User ${userId} second channel status: ${chatMember2.status} (isMember: ${isMember2})`);
+            const memberships = {};
+            let isAllMember = true;
 
-            // User must be a member of both channels
-            const isAllMember = isMember1 && isMember2;
-            console.log(`👤 User ${userId} final membership status: ${isAllMember}`);
+            for (const channel of channels) {
+                const channelId = String(channel.channel_id ?? '').trim();
+                if (!channelId) continue;
 
-            return {
-                isAllMember,
-                memberships: {
-                    [process.env.PUBLIC_CHANNEL_USERNAME]: {
-                        name: 'کانال اول',
-                        isMember: isMember1
-                    },
-                    [process.env.ADDITIONAL_CHANNEL_USERNAME]: {
-                        name: 'کانال دوم',
-                        isMember: isMember2
+                const key = channel.channel_username || channelId;
+                console.log(`📢 Checking membership in channel ${channelId} (${channel.title})`);
+
+                try {
+                    const chatMember = await this.telegram.telegram.getChatMember(channelId, userId);
+                    const isMember = MEMBER_STATUSES.has(chatMember.status);
+                    console.log(
+                        `👤 User ${userId} channel ${channelId} status: ${chatMember.status} (isMember: ${isMember})`
+                    );
+
+                    memberships[key] = {
+                        name: channel.title || key,
+                        isMember,
+                        username: channel.channel_username || null,
+                        campaignId: channel.id || null,
+                        channelId
+                    };
+
+                    if (!isMember) {
+                        isAllMember = false;
                     }
+                } catch (error) {
+                    console.error(`❌ Error checking channel ${channelId}:`, error.message);
+                    memberships[key] = {
+                        name: channel.title || key,
+                        isMember: false,
+                        username: channel.channel_username || null,
+                        campaignId: channel.id || null,
+                        channelId
+                    };
+                    isAllMember = false;
                 }
-            };
+            }
+
+            console.log(`👤 User ${userId} final membership status: ${isAllMember}`);
+            return { isAllMember, memberships, channels };
         } catch (error) {
             console.error('❌ Error checking membership:', error);
             if (error.response) {
                 console.error('Telegram API Response:', error.response.data);
             }
-            return { isAllMember: false, memberships: {} };
+            return { isAllMember: false, memberships: {}, channels: [] };
         }
     }
 }
 
-// Create and export a single instance of the service
 const membershipService = new MembershipService();
-module.exports = membershipService; 
+module.exports = membershipService;
