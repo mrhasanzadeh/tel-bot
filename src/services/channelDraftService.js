@@ -4,6 +4,7 @@ const { getAdminUserId } = require('../utils/channelIds');
 
 /**
  * Extract photo file_id + caption from a message (or its reply / forward).
+ * Supports classic forward_from_chat and Bot API 7+ forward_origin.
  * @param {import('telegraf/types').Message | undefined} message
  */
 function extractChannelPostPayload(message) {
@@ -20,17 +21,33 @@ function extractChannelPostPayload(message) {
     const captionText = message.caption || message.text || '';
     const captionEntities = message.caption_entities || message.entities || [];
 
+    const origin = message.forward_origin;
+    const originChannelId =
+        origin?.type === 'channel' && origin.chat?.id != null
+            ? String(origin.chat.id)
+            : origin?.type === 'channel' && origin.chat_id != null
+              ? String(origin.chat_id)
+              : null;
+    const originMessageId =
+        origin?.type === 'channel' && origin.message_id != null
+            ? origin.message_id
+            : null;
+
     const channelId =
         message.forward_from_chat?.id != null
             ? String(message.forward_from_chat.id)
-            : message.chat?.type === 'channel'
-              ? String(message.chat.id)
-              : null;
+            : originChannelId != null
+              ? originChannelId
+              : message.chat?.type === 'channel'
+                ? String(message.chat.id)
+                : null;
 
     const channelMessageId =
         message.forward_from_message_id != null
             ? message.forward_from_message_id
-            : message.message_id;
+            : originMessageId != null
+              ? originMessageId
+              : message.message_id;
 
     if (!photoFileId || !captionText.trim()) return null;
 
@@ -79,30 +96,40 @@ async function handleBindChannelPost(ctx) {
         return;
     }
 
-    if (!payload.channelId) {
+    const config = require('../../config');
+    const channelId =
+        payload.channelId ||
+        String(config.PUBLIC_POSTS_CHANNEL_ID || config.ADDITIONAL_CHANNEL_ID || '').trim() ||
+        null;
+
+    if (!channelId) {
         await ctx.reply(
-            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن.`,
+            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن ` +
+                `یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
             htmlOpts()
         );
         return;
     }
 
+    // Strip @BotName if Telegram appended it to the command entity.
+    const animeKey = String(animeRef).replace(/@[\w]+$/i, '').trim();
+
     try {
         const result = await shioriApi.put(
-            `/bot/anime/${encodeURIComponent(animeRef)}/channel-template`,
+            `/bot/anime/${encodeURIComponent(animeKey)}/channel-template`,
             {
                 cover_file_id: payload.coverFileId,
                 caption_text: payload.captionText,
                 caption_entities: payload.captionEntities,
-                channel_id: payload.channelId,
+                channel_id: channelId,
                 channel_message_id: payload.channelMessageId
             }
         );
 
         await ctx.reply(
             `${e('success')} قالب کانال ذخیره شد.\n` +
-                `<b>${escapeHtml(result?.title || animeRef)}</b>\n` +
-                `slug: <code>${escapeHtml(result?.slug || animeRef)}</code>\n` +
+                `<b>${escapeHtml(result?.title || animeKey)}</b>\n` +
+                `slug: <code>${escapeHtml(result?.slug || animeKey)}</code>\n` +
                 `از این به بعد با افزودن قسمت در پنل، پیش‌نویس برایت می‌آید.`,
             htmlOpts()
         );

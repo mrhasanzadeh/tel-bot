@@ -984,9 +984,10 @@ class ScheduleService {
     async handleAdminPackInfo(ctx) {
         const adminId = getAdminUserId();
         if (!adminId || String(ctx.from?.id) !== adminId) return false;
+        if (!this.isEnabled()) return false;
 
         const text = ctx.message?.text?.trim();
-        if (!text) return false;
+        if (!text || text.startsWith('/')) return false;
 
         const pending = await getScheduleDb().findPendingAwaitingPack();
         if (!pending) return false;

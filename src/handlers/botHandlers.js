@@ -615,6 +615,10 @@ function setupHandlers(bot) {
         try {
             if (isMonitoredChannelChat(ctx)) return;
 
+            const rawText = String(ctx.message?.text ?? '').trim();
+            // Let bot.command handlers own slash commands (and avoid schedule DB when API-only).
+            if (rawText.startsWith('/')) return;
+
             if (String(ctx.from.id) === getAdminUserId()) {
                 const handledReg = await scheduleService.handleAdminAnimeRegistration(ctx);
                 if (handledReg) return;
