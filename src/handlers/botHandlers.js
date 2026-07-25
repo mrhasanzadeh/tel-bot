@@ -21,6 +21,10 @@ const {
 const botReply = require('../utils/botReply');
 const scheduleService = require('../services/scheduleService');
 const archiveMirrorService = require('../services/archiveMirrorService');
+const {
+    handleBindChannelPost,
+    handleChannelDraftCallback
+} = require('../services/channelDraftService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -289,6 +293,23 @@ function setupHandlers(bot) {
             console.error('link_catalog error:', error);
             await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
         }
+    });
+
+    bot.command('bind_channel_post', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            await handleBindChannelPost(ctx);
+        } catch (error) {
+            console.error('bind_channel_post error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
+    bot.action(/^chdraft_ok_([0-9a-f-]{36})$/i, async (ctx) => {
+        await handleChannelDraftCallback(ctx, ctx.match[1], 'publish');
+    });
+    bot.action(/^chdraft_no_([0-9a-f-]{36})$/i, async (ctx) => {
+        await handleChannelDraftCallback(ctx, ctx.match[1], 'reject');
     });
 
     bot.command('mirroring', async (ctx) => {

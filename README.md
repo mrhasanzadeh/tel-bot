@@ -83,8 +83,11 @@ docker compose up -d
 - `/checkchannels` — verify bot access to configured channels
 - `/chatid` — reply to a forwarded channel post to see its chat id
 - `/link_catalog <schedule_slug> <catalog_slug>` — link schedule anime to catalog for mini-app channel button
+- `/bind_channel_post <catalog_slug>` — reply to a forwarded channel post to bind it as the caption/cover template for that catalog anime (admin drafts after adding episodes in dash)
 
 Schedule channel posts include a glass **دانلود از مینی‌اپ** button when `catalog_anime_id` is set (auto-matched on registration by slug, or via `/link_catalog`).
+
+After binding a channel template, adding an episode in the admin panel DMs you a draft post; approve to publish to the posts channel.
 
 ## License
 
