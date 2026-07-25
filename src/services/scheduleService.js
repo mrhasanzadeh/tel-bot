@@ -26,6 +26,10 @@ const {
 const { parsePackEpisodesSlug, parsePackSubtitleKey } = require('../utils/schedulePackParse');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const { channelCaptionOpts } = require('../utils/captionEntities');
+const {
+    setCachedBotUsername,
+    buildMiniAppDownloadKeyboard
+} = require('../utils/miniAppLinks');
 
 class ScheduleService {
     constructor() {
@@ -35,6 +39,10 @@ class ScheduleService {
     /** @param {import('telegraf').Telegraf} bot */
     setTelegram(bot) {
         this.telegram = bot;
+        void bot.telegram
+            .getMe()
+            .then((me) => setCachedBotUsername(me?.username))
+            .catch(() => {});
     }
 
     isEnabled() {
@@ -478,6 +486,19 @@ class ScheduleService {
             channelId: String(channelId)
         });
 
+        let catalogLine = `${e('warning')} کاتالوگ مینی‌اپ: لینک نشده — <code>/link_catalog ${escapeHtml(slug)} &lt;catalog_slug&gt;</code>\n`;
+        try {
+            const catalog = await getScheduleDb().findCatalogAnimeBySlugOrId(slug);
+            if (catalog?.id) {
+                await getScheduleDb().updateAnimeCatalogId(anime.id, catalog.id);
+                anime.catalogAnimeId = catalog.id;
+                catalogLine =
+                    `${e('success')} کاتالوگ مینی‌اپ: <code>${escapeHtml(catalog.slug || catalog.id)}</code>\n`;
+            }
+        } catch (err) {
+            console.warn('📋 Catalog link on registration failed:', err.message);
+        }
+
         await getScheduleDb().deleteAnimeRegistration(reg.filename_title);
         await getScheduleDb().upsertUploadBatch(anime.id, 1, 'video', reg.video_key);
         if (!packOnly && reg.subtitle_key) {
@@ -502,8 +523,9 @@ class ScheduleService {
                 `<b>Hashtag:</b> ${escapeHtml(reg.hashtag)}\n` +
                 subModeLine +
                 synopsisLine +
-                `<b>slug:</b> <code>${escapeHtml(slug)}</code>\n\n` +
-                `در حال ساخت پیش‌نمایش E01…`
+                `<b>slug:</b> <code>${escapeHtml(slug)}</code>\n` +
+                catalogLine +
+                `\nدر حال ساخت پیش‌نمایش E01…`
         );
 
         console.log(`📋 Schedule: registered new anime slug=${slug} title="${reg.english_title}"`);
@@ -1185,6 +1207,66 @@ class ScheduleService {
     }
 
     /**
+     * Admin: /link_catalog <schedule_slug> <catalog_slug_or_uuid>
+     * @param {import('telegraf').Context} ctx
+     * @param {string} scheduleSlug
+     * @param {string} catalogSlugOrId
+     */
+    async handleLinkCatalog(ctx, scheduleSlug, catalogSlugOrId) {
+        if (!this.isEnabled()) {
+            await ctx.reply(
+                `${e('warning')} ماژول schedule فعال نیست (نیاز به Postgres مستقیم و کانال انتشار).`,
+                htmlOpts()
+            );
+            return;
+        }
+
+        const schedSlug = String(scheduleSlug ?? '').trim();
+        const catalogKey = String(catalogSlugOrId ?? '').trim();
+        if (!schedSlug || !catalogKey) {
+            await ctx.reply(
+                `${e('clipboard')} <b>راهنما</b>\n<code>/link_catalog &lt;schedule_slug&gt; &lt;catalog_slug&gt;</code>`,
+                htmlOpts()
+            );
+            return;
+        }
+
+        const anime = await getScheduleDb().getAnimeBySlug(schedSlug);
+        if (!anime) {
+            await ctx.reply(
+                `${e('error')} انیمه schedule با اسلاگ <code>${escapeHtml(schedSlug)}</code> پیدا نشد.`,
+                htmlOpts()
+            );
+            return;
+        }
+
+        let catalog;
+        try {
+            catalog = await getScheduleDb().findCatalogAnimeBySlugOrId(catalogKey);
+        } catch (err) {
+            await ctx.reply(`${e('error')} خطا در خواندن کاتالوگ: ${escapeHtml(err.message)}`, htmlOpts());
+            return;
+        }
+
+        if (!catalog?.id) {
+            await ctx.reply(
+                `${e('error')} انیمه کاتالوگ با <code>${escapeHtml(catalogKey)}</code> پیدا نشد.`,
+                htmlOpts()
+            );
+            return;
+        }
+
+        await getScheduleDb().updateAnimeCatalogId(anime.id, catalog.id);
+        await ctx.reply(
+            `${e('success')} لینک کاتالوگ ثبت شد.\n` +
+                `<b>schedule:</b> <code>${escapeHtml(anime.slug)}</code>\n` +
+                `<b>catalog:</b> ${escapeHtml(catalog.title || '')}\n` +
+                `<code>${escapeHtml(catalog.slug || catalog.id)}</code>`,
+            htmlOpts()
+        );
+    }
+
+    /**
      * Re-publish an already approved release (e.g. after deleting channel post).
      * @param {import('telegraf').Context} ctx
      * @param {number} pendingId
@@ -1254,6 +1336,15 @@ class ScheduleService {
             pending.coverPhotoFileId || anime.coverPhotoFileId || null;
 
         const captionPayload = channelCaptionOpts(caption);
+        const miniAppKeyboard = buildMiniAppDownloadKeyboard(anime.catalogAnimeId);
+        if (miniAppKeyboard) {
+            captionPayload.reply_markup = miniAppKeyboard;
+        } else {
+            console.warn(
+                `📋 Schedule publish without mini-app button (catalog_anime_id missing) ` +
+                    `slug=${anime.slug} pending=${pending.id}`
+            );
+        }
         let newMessageId;
 
         if (photoFileId) {
@@ -1300,7 +1391,8 @@ class ScheduleService {
                     captionPayload.caption,
                     {
                         caption_entities: captionPayload.caption_entities,
-                        disable_web_page_preview: true
+                        disable_web_page_preview: true,
+                        ...(miniAppKeyboard ? { reply_markup: miniAppKeyboard } : {})
                     }
                 );
             }

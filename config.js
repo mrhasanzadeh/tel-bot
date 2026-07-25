@@ -13,6 +13,8 @@ const parseEnvBool = (value, defaultValue = true) => {
 module.exports = {
     parseEnvBool,
     BOT_TOKEN: process.env.BOT_TOKEN,
+    /** Username of the bot that hosts the Mini App (no @). Used for startapp deep links. */
+    TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME || 'ShioriUploadBot',
     SHIORI_API_URL: process.env.SHIORI_API_URL,
     BOT_API_TOKEN: process.env.BOT_API_TOKEN,
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,

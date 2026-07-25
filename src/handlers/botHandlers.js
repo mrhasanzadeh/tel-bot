@@ -272,6 +272,25 @@ function setupHandlers(bot) {
         }
     });
 
+    bot.command('link_catalog', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        if (String(ctx.from?.id) !== getAdminUserId()) {
+            await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
+            return;
+        }
+        const parts = String(ctx.message?.text ?? '')
+            .trim()
+            .split(/\s+/);
+        const scheduleSlug = parts[1] || '';
+        const catalogSlug = parts[2] || '';
+        try {
+            await scheduleService.handleLinkCatalog(ctx, scheduleSlug, catalogSlug);
+        } catch (error) {
+            console.error('link_catalog error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
     bot.command('mirroring', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
         if (String(ctx.from?.id) !== getAdminUserId()) {

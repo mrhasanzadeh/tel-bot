@@ -44,6 +44,7 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 | Variable | Purpose |
 |----------|---------|
 | `BOT_TOKEN` | Telegram bot token |
+| `TELEGRAM_BOT_USERNAME` | Bot username for Mini App `startapp` links (no `@`) |
 | `SHIORI_API_URL` | Shiori API base URL (e.g. `https://api.shiori.cloud`) |
 | `BOT_API_TOKEN` | Shared secret for `x-bot-token` header |
 | `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
@@ -81,6 +82,9 @@ docker compose up -d
 - `/cancel` — stop active pack send
 - `/checkchannels` — verify bot access to configured channels
 - `/chatid` — reply to a forwarded channel post to see its chat id
+- `/link_catalog <schedule_slug> <catalog_slug>` — link schedule anime to catalog for mini-app channel button
+
+Schedule channel posts include a glass **دانلود از مینی‌اپ** button when `catalog_anime_id` is set (auto-matched on registration by slug, or via `/link_catalog`).
 
 ## License
 

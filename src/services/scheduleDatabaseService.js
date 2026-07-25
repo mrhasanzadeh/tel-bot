@@ -21,6 +21,7 @@ function mapAnime(row) {
         templateMessageId: row.template_message_id,
         latestScheduleMessageId: row.latest_schedule_message_id,
         coverPhotoFileId: row.cover_photo_file_id,
+        catalogAnimeId: row.catalog_anime_id ?? null,
         channelId: row.channel_id
     };
 }
@@ -356,6 +357,42 @@ class ScheduleDatabaseService {
              WHERE id = $1
              RETURNING *`,
             [animeId, coverPhotoFileId]
+        );
+        return mapAnime(row);
+    }
+
+    /**
+     * Resolve catalog `anime` row by public slug (or UUID string).
+     * @param {string} slugOrId
+     * @returns {Promise<{ id: string, slug: string | null, title: string } | null>}
+     */
+    async findCatalogAnimeBySlugOrId(slugOrId) {
+        const key = String(slugOrId ?? '').trim();
+        if (!key) return null;
+
+        const bySlug = await one(
+            `SELECT id, slug, title FROM anime WHERE slug = $1 LIMIT 1`,
+            [key]
+        );
+        if (bySlug) {
+            return { id: bySlug.id, slug: bySlug.slug, title: bySlug.title };
+        }
+
+        const byId = await one(
+            `SELECT id, slug, title FROM anime WHERE id::text = $1 LIMIT 1`,
+            [key]
+        );
+        if (!byId) return null;
+        return { id: byId.id, slug: byId.slug, title: byId.title };
+    }
+
+    async updateAnimeCatalogId(animeId, catalogAnimeId) {
+        const row = await one(
+            `UPDATE anime_posts
+             SET catalog_anime_id = $2, updated_at = now()
+             WHERE id = $1
+             RETURNING *`,
+            [animeId, catalogAnimeId]
         );
         return mapAnime(row);
     }
