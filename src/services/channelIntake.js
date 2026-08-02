@@ -7,6 +7,8 @@ const archiveMirrorService = require('./archiveMirrorService');
 
 /**
  * Route file posts from archive or private channels.
+ * Archive (LINKS_CHANNEL_ID): copy once into PRIVATE_CHANNEL_ID and register there.
+ * Private/links: register new uploads; media replace updates file_name via message_id.
  * Handles both channel_post (broadcast) and message (supergroup) updates.
  *
  * @param {import('telegraf').Context} ctx
