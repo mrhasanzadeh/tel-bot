@@ -590,6 +590,18 @@ async function deliverPendingChannelDraftPreviews(bot) {
             console.log(`📋 Channel draft preview delivered draft=${draftId} → ${chatId}`);
         } catch (error) {
             console.error(`📋 channel draft preview failed draft=${draftId}:`, error.message);
+            // Drop from queue so one bad draft cannot block forever
+            try {
+                await shioriApi.post(
+                    `/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`
+                );
+                console.warn(`📋 rejected stuck draft=${draftId} after preview failure`);
+            } catch (rejectErr) {
+                console.warn(
+                    `📋 could not reject draft=${draftId}:`,
+                    rejectErr instanceof Error ? rejectErr.message : rejectErr
+                );
+            }
         }
     }
 }
@@ -619,12 +631,67 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
     return timer;
 }
 
+/**
+ * Admin: reject all pending drafts still waiting for preview.
+ * @param {import('telegraf').Context} ctx
+ */
+async function handleClearChannelDrafts(ctx) {
+    const adminId = getAdminUserId();
+    if (String(ctx.from?.id) !== String(adminId)) {
+        await ctx.reply(`${e('error')} این دستور فقط برای ادمین است.`, htmlOpts());
+        return;
+    }
+
+    try {
+        const result = await shioriApi.post('/bot/channel-drafts/clear-pending');
+        const cleared = Number(result?.cleared ?? 0);
+        await ctx.reply(
+            `${e('success')} صف پیش‌نویس پاک شد.\n` +
+                `رد شده: <code>${cleared}</code>`,
+            htmlOpts()
+        );
+    } catch (error) {
+        console.error('clear_channel_drafts error:', error);
+        await ctx.reply(
+            `${e('error')} خطا: ${escapeHtml(error.message)}`,
+            htmlOpts()
+        );
+    }
+}
+
+/**
+ * Admin: immediately poll and deliver pending previews.
+ * @param {import('telegraf').Telegraf} bot
+ * @param {import('telegraf').Context} ctx
+ */
+async function handleFlushChannelDrafts(bot, ctx) {
+    const adminId = getAdminUserId();
+    if (String(ctx.from?.id) !== String(adminId)) {
+        await ctx.reply(`${e('error')} این دستور فقط برای ادمین است.`, htmlOpts());
+        return;
+    }
+
+    await ctx.reply(`${e('timer')} در حال ارسال پیش‌نویس‌های در صف...`, htmlOpts());
+    try {
+        await deliverPendingChannelDraftPreviews(bot);
+        await ctx.reply(`${e('success')} فلش صف انجام شد.`, htmlOpts());
+    } catch (error) {
+        console.error('flush_channel_drafts error:', error);
+        await ctx.reply(
+            `${e('error')} خطا: ${escapeHtml(error.message)}`,
+            htmlOpts()
+        );
+    }
+}
+
 module.exports = {
     handleBindChannelPost,
     handleBindPickCallback,
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
+    handleClearChannelDrafts,
+    handleFlushChannelDrafts,
     deliverPendingChannelDraftPreviews,
     startChannelDraftPreviewPoller,
     extractChannelPostPayload,

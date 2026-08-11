@@ -26,7 +26,9 @@ const {
     handleBindPickCallback,
     handleBindRetryCallback,
     handleBindCancelCallback,
-    handleChannelDraftCallback
+    handleChannelDraftCallback,
+    handleClearChannelDrafts,
+    handleFlushChannelDrafts
 } = require('../services/channelDraftService');
 
 // Store pending links for non-member users
@@ -304,6 +306,26 @@ function setupHandlers(bot) {
             await handleBindChannelPost(ctx);
         } catch (error) {
             console.error('bind_channel_post error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
+    bot.command('clear_channel_drafts', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            await handleClearChannelDrafts(ctx);
+        } catch (error) {
+            console.error('clear_channel_drafts error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
+    bot.command('flush_channel_drafts', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            await handleFlushChannelDrafts(bot, ctx);
+        } catch (error) {
+            console.error('flush_channel_drafts error:', error);
             await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
         }
     });

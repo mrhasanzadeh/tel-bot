@@ -84,6 +84,8 @@ docker compose up -d
 - `/chatid` — reply to a forwarded channel post to see its chat id
 - `/link_catalog <schedule_slug> <catalog_slug>` — link schedule anime to catalog for mini-app channel button
 - `/bind_channel_post` — reply to a forwarded channel post; bot searches the catalog and lets you pick the anime (optional query: `/bind_channel_post dandadan`)
+- `/flush_channel_drafts` — immediately deliver queued channel post previews
+- `/clear_channel_drafts` — reject all pending drafts still waiting for preview (clear stuck queue)
 
 Schedule channel posts include a glass **دانلود از مینی‌اپ** button when `catalog_anime_id` is set (auto-matched on registration by slug, or via `/link_catalog`).
 
