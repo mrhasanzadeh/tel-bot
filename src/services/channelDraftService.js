@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
-const { channelCaptionOpts } = require('../utils/captionEntities');
+const { sendPhotoWithHtmlCaption } = require('../utils/captionEntities');
 const { getAdminUserId } = require('../utils/channelIds');
 
 /** @typedef {{
@@ -466,10 +466,13 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
             throw new Error('publish payload incomplete');
         }
 
-        const sent = await ctx.telegram.sendPhoto(channelId, cover, {
-            ...channelCaptionOpts(caption),
-            reply_markup: prepared.reply_markup || undefined
-        });
+        const sent = await sendPhotoWithHtmlCaption(
+            ctx.telegram,
+            channelId,
+            cover,
+            caption,
+            { reply_markup: prepared.reply_markup || undefined }
+        );
 
         const messageId = sent?.message_id;
         if (!messageId) {
@@ -554,28 +557,13 @@ async function deliverPendingChannelDraftPreviews(bot) {
                 htmlOpts()
             );
 
-            /** @type {import('telegraf/types').Message.PhotoMessage | undefined} */
-            let preview;
-            try {
-                preview = await bot.telegram.sendPhoto(chatId, cover, {
-                    ...channelCaptionOpts(caption),
-                    reply_markup: item.draft_keyboard || undefined
-                });
-            } catch (photoErr) {
-                // Caption too long / entity issue — send photo + caption separately
-                console.warn(
-                    `📋 sendPhoto+caption failed draft=${draftId}: ${photoErr.message}; retrying split`
-                );
-                preview = await bot.telegram.sendPhoto(chatId, cover, {
-                    reply_markup: item.draft_keyboard || undefined
-                });
-                const textPayload = channelCaptionOpts(caption);
-                await bot.telegram.sendMessage(chatId, textPayload.caption, {
-                    entities: textPayload.caption_entities,
-                    disable_web_page_preview: true,
-                    reply_markup: item.draft_keyboard || undefined
-                });
-            }
+            const preview = await sendPhotoWithHtmlCaption(
+                bot.telegram,
+                chatId,
+                cover,
+                caption,
+                { reply_markup: item.draft_keyboard || undefined }
+            );
 
             const messageId = preview?.message_id;
             if (!messageId) {

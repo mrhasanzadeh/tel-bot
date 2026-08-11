@@ -25,7 +25,7 @@ const {
 } = require('../utils/channelIds');
 const { parsePackEpisodesSlug, parsePackSubtitleKey } = require('../utils/schedulePackParse');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
-const { channelCaptionOpts } = require('../utils/captionEntities');
+const { channelCaptionOpts, sendPhotoWithHtmlCaption } = require('../utils/captionEntities');
 const {
     setCachedBotUsername,
     buildMiniAppDownloadKeyboard
@@ -1336,7 +1336,7 @@ class ScheduleService {
         const photoFileId =
             pending.coverPhotoFileId || anime.coverPhotoFileId || null;
 
-        const captionPayload = channelCaptionOpts(caption);
+        const captionPayload = channelCaptionOpts(caption, { maxLen: 1024 });
         const miniAppKeyboard = buildMiniAppDownloadKeyboard(anime.catalogAnimeId);
         if (miniAppKeyboard) {
             captionPayload.reply_markup = miniAppKeyboard;
@@ -1354,7 +1354,13 @@ class ScheduleService {
                     `sendPhoto ep=${pending.episode}`
             );
 
-            const sent = await this.telegram.telegram.sendPhoto(channelId, photoFileId, captionPayload);
+            const sent = await sendPhotoWithHtmlCaption(
+                this.telegram.telegram,
+                channelId,
+                photoFileId,
+                caption,
+                miniAppKeyboard ? { reply_markup: miniAppKeyboard } : {}
+            );
             newMessageId = sent.message_id;
 
             if (!anime.coverPhotoFileId) {
