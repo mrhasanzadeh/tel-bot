@@ -505,23 +505,46 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
  */
 async function deliverPendingChannelDraftPreviews(bot) {
     const adminId = getAdminUserId();
-    if (!adminId) return;
+    if (!adminId) {
+        console.warn(
+            '📋 Channel draft poller: ADMIN_USER_ID missing on tel-bot — cannot DM previews'
+        );
+        return;
+    }
 
     let data;
     try {
         data = await shioriApi.get('/bot/channel-drafts/pending-preview?limit=5');
     } catch (error) {
-        console.warn('pending-preview poll failed:', error.message);
+        console.warn('📋 pending-preview poll failed:', error.message);
+        return;
+    }
+
+    if (data == null) {
+        console.warn(
+            '📋 pending-preview returned 404/empty — deploy latest api.shiori.cloud (channel-drafts/pending-preview)'
+        );
         return;
     }
 
     const items = Array.isArray(data?.items) ? data.items : [];
+    if (!items.length) return;
+
+    console.log(`📋 Channel draft poller: ${items.length} pending preview(s)`);
+
     for (const item of items) {
         const draftId = item.id;
         const cover = item.cover_file_id;
         const caption = item.proposed_caption;
-        const chatId = item.admin_user_id || item.admin_preview_chat_id || adminId;
-        if (!draftId || !cover || !caption || !chatId) continue;
+        const chatId = String(
+            item.admin_user_id || item.admin_preview_chat_id || adminId
+        ).trim();
+        if (!draftId || !cover || !caption || !chatId) {
+            console.warn(
+                `📋 skip draft=${draftId || '?'} missing fields cover=${Boolean(cover)} caption=${Boolean(caption)} chat=${chatId}`
+            );
+            continue;
+        }
 
         try {
             await bot.telegram.sendMessage(
@@ -532,16 +555,33 @@ async function deliverPendingChannelDraftPreviews(bot) {
                 htmlOpts()
             );
 
-            const preview = await bot.telegram.sendPhoto(chatId, cover, {
-                caption,
-                parse_mode: 'HTML',
-                reply_markup: item.draft_keyboard || undefined,
-                disable_web_page_preview: true
-            });
+            /** @type {import('telegraf/types').Message.PhotoMessage | undefined} */
+            let preview;
+            try {
+                preview = await bot.telegram.sendPhoto(chatId, cover, {
+                    caption,
+                    parse_mode: 'HTML',
+                    reply_markup: item.draft_keyboard || undefined,
+                    disable_web_page_preview: true
+                });
+            } catch (photoErr) {
+                // Caption too long / HTML issue — send photo + caption separately
+                console.warn(
+                    `📋 sendPhoto+caption failed draft=${draftId}: ${photoErr.message}; retrying split`
+                );
+                preview = await bot.telegram.sendPhoto(chatId, cover, {
+                    reply_markup: item.draft_keyboard || undefined
+                });
+                await bot.telegram.sendMessage(chatId, caption, {
+                    ...htmlOpts(),
+                    disable_web_page_preview: true,
+                    reply_markup: item.draft_keyboard || undefined
+                });
+            }
 
             const messageId = preview?.message_id;
             if (!messageId) {
-                console.warn(`preview send missing message_id draft=${draftId}`);
+                console.warn(`📋 preview send missing message_id draft=${draftId}`);
                 continue;
             }
 
@@ -549,9 +589,9 @@ async function deliverPendingChannelDraftPreviews(bot) {
                 `/bot/channel-drafts/${encodeURIComponent(draftId)}/ack-preview`,
                 { chat_id: chatId, message_id: messageId }
             );
-            console.log(`📋 Channel draft preview delivered draft=${draftId}`);
+            console.log(`📋 Channel draft preview delivered draft=${draftId} → ${chatId}`);
         } catch (error) {
-            console.error(`channel draft preview failed draft=${draftId}:`, error.message);
+            console.error(`📋 channel draft preview failed draft=${draftId}:`, error.message);
         }
     }
 }
@@ -560,14 +600,24 @@ async function deliverPendingChannelDraftPreviews(bot) {
  * @param {import('telegraf').Telegraf} bot
  * @param {number} [intervalMs]
  */
-function startChannelDraftPreviewPoller(bot, intervalMs = 12_000) {
-    const tick = () => {
-        void deliverPendingChannelDraftPreviews(bot);
+function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
+    let running = false;
+    const tick = async () => {
+        if (running) return;
+        running = true;
+        try {
+            await deliverPendingChannelDraftPreviews(bot);
+        } finally {
+            running = false;
+        }
     };
-    tick();
-    const timer = setInterval(tick, intervalMs);
-    if (typeof timer.unref === 'function') timer.unref();
-    console.log(`📋 Channel draft preview poller started (${intervalMs}ms)`);
+    void tick();
+    const timer = setInterval(() => {
+        void tick();
+    }, intervalMs);
+    console.log(
+        `📋 Channel draft preview poller started (${intervalMs}ms) admin=${getAdminUserId() || 'MISSING'}`
+    );
     return timer;
 }
 
