@@ -10,7 +10,8 @@
     "migrate:keys": "node src/scripts/migrateFileKeys.js",
     "reindex:channel": "node src/scripts/reindexPrivateChannel.js",
     "schedule:import-chiramune": "node src/scripts/importChiramuneSchedule.js",
-    "test:archive-intake": "node scripts/test-archive-intake-guards.js && node scripts/test-archive-intake-flow.js && node scripts/test-file-handler-archive-fix.js"
+    "test:archive-intake": "node scripts/test-archive-intake-guards.js && node scripts/test-archive-intake-flow.js && node scripts/test-file-handler-archive-form.js",
+    "test:channel-bind": "node scripts/test-channel-bind-helpers.js"
   },
   "keywords": [
     "telegram",

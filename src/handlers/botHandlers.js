@@ -23,6 +23,9 @@ const scheduleService = require('../services/scheduleService');
 const archiveMirrorService = require('../services/archiveMirrorService');
 const {
     handleBindChannelPost,
+    handleBindPickCallback,
+    handleBindRetryCallback,
+    handleBindCancelCallback,
     handleChannelDraftCallback
 } = require('../services/channelDraftService');
 
@@ -302,6 +305,32 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('bind_channel_post error:', error);
             await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
+    // bp:{bindId}:{animeUuid} — pick anime for channel template bind
+    bot.action(/^bp:([a-f0-9]{8}):([0-9a-f-]{36})$/i, async (ctx) => {
+        try {
+            await handleBindPickCallback(ctx, ctx.match[1], ctx.match[2]);
+        } catch (error) {
+            console.error('bind_pick error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+    bot.action(/^br:([a-f0-9]{8})$/i, async (ctx) => {
+        try {
+            await handleBindRetryCallback(ctx, ctx.match[1]);
+        } catch (error) {
+            console.error('bind_retry error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+    bot.action(/^bc:([a-f0-9]{8})$/i, async (ctx) => {
+        try {
+            await handleBindCancelCallback(ctx, ctx.match[1]);
+        } catch (error) {
+            console.error('bind_cancel error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
         }
     });
 
