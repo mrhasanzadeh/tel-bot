@@ -13,6 +13,14 @@ function setCachedBotUsername(username) {
     if (cleaned) cachedBotUsername = cleaned;
 }
 
+function getMiniAppBotUsername() {
+    const fromEnv = String(config.TELEGRAM_MINI_APP_BOT_USERNAME ?? '')
+        .trim()
+        .replace(/^@/, '');
+    if (fromEnv) return fromEnv;
+    return 'ShioriMiniBot';
+}
+
 function getBotUsername() {
     const fromEnv = String(config.TELEGRAM_BOT_USERNAME ?? '')
         .trim()
@@ -28,7 +36,7 @@ function getBotUsername() {
 function buildAnimeEpisodesMiniAppUrl(catalogAnimeId) {
     const id = String(catalogAnimeId ?? '').trim();
     if (!id) return '';
-    const bot = getBotUsername();
+    const bot = getMiniAppBotUsername();
     return `https://t.me/${bot}?startapp=${encodeURIComponent(`anime_${id}_episodes`)}`;
 }
 
@@ -55,6 +63,7 @@ function buildMiniAppDownloadKeyboard(catalogAnimeId) {
 module.exports = {
     setCachedBotUsername,
     getBotUsername,
+    getMiniAppBotUsername,
     buildAnimeEpisodesMiniAppUrl,
     buildMiniAppDownloadKeyboard
 };
