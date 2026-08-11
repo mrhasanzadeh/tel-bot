@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
+const { channelCaptionOpts } = require('../utils/captionEntities');
 const { getAdminUserId } = require('../utils/channelIds');
 
 /** @typedef {{
@@ -466,10 +467,8 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
         }
 
         const sent = await ctx.telegram.sendPhoto(channelId, cover, {
-            caption,
-            parse_mode: 'HTML',
-            reply_markup: prepared.reply_markup || undefined,
-            disable_web_page_preview: true
+            ...channelCaptionOpts(caption),
+            reply_markup: prepared.reply_markup || undefined
         });
 
         const messageId = sent?.message_id;
@@ -559,21 +558,20 @@ async function deliverPendingChannelDraftPreviews(bot) {
             let preview;
             try {
                 preview = await bot.telegram.sendPhoto(chatId, cover, {
-                    caption,
-                    parse_mode: 'HTML',
-                    reply_markup: item.draft_keyboard || undefined,
-                    disable_web_page_preview: true
+                    ...channelCaptionOpts(caption),
+                    reply_markup: item.draft_keyboard || undefined
                 });
             } catch (photoErr) {
-                // Caption too long / HTML issue — send photo + caption separately
+                // Caption too long / entity issue — send photo + caption separately
                 console.warn(
                     `📋 sendPhoto+caption failed draft=${draftId}: ${photoErr.message}; retrying split`
                 );
                 preview = await bot.telegram.sendPhoto(chatId, cover, {
                     reply_markup: item.draft_keyboard || undefined
                 });
-                await bot.telegram.sendMessage(chatId, caption, {
-                    ...htmlOpts(),
+                const textPayload = channelCaptionOpts(caption);
+                await bot.telegram.sendMessage(chatId, textPayload.caption, {
+                    entities: textPayload.caption_entities,
                     disable_web_page_preview: true,
                     reply_markup: item.draft_keyboard || undefined
                 });
