@@ -62,10 +62,10 @@ function buildScheduleCaption(opts) {
         if (!packOnly && ep.subtitleKey) {
             const subUrl = fileLink(botUsername, ep.subtitleKey);
             lines.push(
-                `${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p Softsub]')} | ${tgLink(subUrl, 'Subtitle')}`
+                `${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p][Softsub]')} | ${tgLink(subUrl, 'Subtitle')}`
             );
         } else {
-            lines.push(`${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p Softsub]')}`);
+            lines.push(`${emoji} <b>E${epLabel}</b>: ${tgLink(videoUrl, '[1080p][Softsub]')}`);
         }
     }
 
