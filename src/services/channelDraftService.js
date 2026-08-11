@@ -545,6 +545,19 @@ async function deliverPendingChannelDraftPreviews(bot) {
             console.warn(
                 `📋 skip draft=${draftId || '?'} missing fields cover=${Boolean(cover)} caption=${Boolean(caption)} chat=${chatId}`
             );
+            if (draftId) {
+                try {
+                    await shioriApi.post(
+                        `/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`
+                    );
+                    console.warn(`📋 rejected incomplete draft=${draftId}`);
+                } catch (rejectErr) {
+                    console.warn(
+                        `📋 could not reject incomplete draft=${draftId}:`,
+                        rejectErr instanceof Error ? rejectErr.message : rejectErr
+                    );
+                }
+            }
             continue;
         }
 
@@ -568,6 +581,13 @@ async function deliverPendingChannelDraftPreviews(bot) {
             const messageId = preview?.message_id;
             if (!messageId) {
                 console.warn(`📋 preview send missing message_id draft=${draftId}`);
+                try {
+                    await shioriApi.post(
+                        `/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`
+                    );
+                } catch (_) {
+                    /* ignore */
+                }
                 continue;
             }
 
