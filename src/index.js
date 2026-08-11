@@ -70,6 +70,12 @@ async function start() {
     await runStartupSecurityChecks(bot);
 
     setupHandlers(bot);
+    await logChannelSetup(bot);
+
+    // Telegraf's bot.launch() Promise resolves only when the bot *stops*.
+    // Start background jobs before awaiting launch, otherwise they never run.
+    startChannelDraftPreviewPoller(bot);
+    console.log('✅ Bot started successfully');
 
     await bot.launch({
         allowedUpdates: [
@@ -81,10 +87,6 @@ async function start() {
             'message_delete'
         ]
     });
-
-    console.log('✅ Bot started successfully');
-    await logChannelSetup(bot);
-    startChannelDraftPreviewPoller(bot);
 }
 
 start().catch((err) => {
