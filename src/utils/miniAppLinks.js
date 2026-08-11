@@ -45,8 +45,7 @@ function buildMiniAppDownloadKeyboard(catalogAnimeId) {
             [
                 inlineButton({
                     text: 'دانلود از مینی‌اپ',
-                    url,
-                    style: 'primary'
+                    url
                 })
             ]
         ]
