@@ -433,18 +433,61 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
     await ctx.answerCbQuery(action === 'publish' ? 'در حال انتشار...' : 'رد شد');
 
     try {
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch {
+            /* ignore */
+        }
+
         if (action === 'reject') {
             await shioriApi.post(`/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`);
             await ctx.reply(`${e('stop')} پیش‌نویس رد شد.`, htmlOpts());
             return;
         }
 
-        const published = await shioriApi.post(
+        const prepared = await shioriApi.post(
             `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`
         );
+
+        if (prepared?.already_published) {
+            await ctx.reply(`${e('info')} قبلاً منتشر شده بود.`, htmlOpts());
+            return;
+        }
+
+        if (!prepared?.needs_bot_send) {
+            throw new Error('publish payload missing needs_bot_send');
+        }
+
+        const channelId = prepared.channel_id;
+        const cover = prepared.cover_file_id;
+        const caption = prepared.caption;
+        if (!channelId || !cover || !caption) {
+            throw new Error('publish payload incomplete');
+        }
+
+        const sent = await ctx.telegram.sendPhoto(channelId, cover, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: prepared.reply_markup || undefined,
+            disable_web_page_preview: true
+        });
+
+        const messageId = sent?.message_id;
+        if (!messageId) {
+            throw new Error('sendPhoto returned no message_id');
+        }
+
+        await shioriApi.post(
+            `/bot/channel-drafts/${encodeURIComponent(draftId)}/mark-published`,
+            {
+                published_message_id: messageId,
+                channel_id: channelId
+            }
+        );
+
         await ctx.reply(
             `${e('success')} منتشر شد.\n` +
-                `message_id: <code>${escapeHtml(String(published?.published_message_id ?? ''))}</code>`,
+                `message_id: <code>${escapeHtml(String(messageId))}</code>`,
             htmlOpts()
         );
     } catch (error) {
@@ -456,12 +499,86 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
     }
 }
 
+/**
+ * Deliver queued channel-draft previews (API cannot reach Telegram on this host).
+ * @param {import('telegraf').Telegraf} bot
+ */
+async function deliverPendingChannelDraftPreviews(bot) {
+    const adminId = getAdminUserId();
+    if (!adminId) return;
+
+    let data;
+    try {
+        data = await shioriApi.get('/bot/channel-drafts/pending-preview?limit=5');
+    } catch (error) {
+        console.warn('pending-preview poll failed:', error.message);
+        return;
+    }
+
+    const items = Array.isArray(data?.items) ? data.items : [];
+    for (const item of items) {
+        const draftId = item.id;
+        const cover = item.cover_file_id;
+        const caption = item.proposed_caption;
+        const chatId = item.admin_user_id || item.admin_preview_chat_id || adminId;
+        if (!draftId || !cover || !caption || !chatId) continue;
+
+        try {
+            await bot.telegram.sendMessage(
+                chatId,
+                `پیش‌نویس پست کانال\n` +
+                    `<b>${escapeHtml(String(item.anime_title || ''))}</b> — قسمت ${escapeHtml(String(item.episode_number ?? ''))}\n` +
+                    `تأیید → انتشار در کانال`,
+                htmlOpts()
+            );
+
+            const preview = await bot.telegram.sendPhoto(chatId, cover, {
+                caption,
+                parse_mode: 'HTML',
+                reply_markup: item.draft_keyboard || undefined,
+                disable_web_page_preview: true
+            });
+
+            const messageId = preview?.message_id;
+            if (!messageId) {
+                console.warn(`preview send missing message_id draft=${draftId}`);
+                continue;
+            }
+
+            await shioriApi.post(
+                `/bot/channel-drafts/${encodeURIComponent(draftId)}/ack-preview`,
+                { chat_id: chatId, message_id: messageId }
+            );
+            console.log(`📋 Channel draft preview delivered draft=${draftId}`);
+        } catch (error) {
+            console.error(`channel draft preview failed draft=${draftId}:`, error.message);
+        }
+    }
+}
+
+/**
+ * @param {import('telegraf').Telegraf} bot
+ * @param {number} [intervalMs]
+ */
+function startChannelDraftPreviewPoller(bot, intervalMs = 12_000) {
+    const tick = () => {
+        void deliverPendingChannelDraftPreviews(bot);
+    };
+    tick();
+    const timer = setInterval(tick, intervalMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    console.log(`📋 Channel draft preview poller started (${intervalMs}ms)`);
+    return timer;
+}
+
 module.exports = {
     handleBindChannelPost,
     handleBindPickCallback,
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
+    deliverPendingChannelDraftPreviews,
+    startChannelDraftPreviewPoller,
     extractChannelPostPayload,
     extractSearchQueryFromCaption
 };
