@@ -35,9 +35,27 @@ function isScheduleTestMode() {
     return Boolean(normalizeChatId(config.SCHEDULE_TEST_CHANNEL_ID));
 }
 
+function getAdminUserIds() {
+    const raw = String(config.ADMIN_USER_ID ?? '').trim();
+    if (!raw) return [];
+    return raw
+        .split(/[,;\s]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+}
+
+/** Primary admin (first id) — used for legacy single-target paths. */
 function getAdminUserId() {
-    const id = config.ADMIN_USER_ID;
-    return id ? String(id).trim() : '';
+    return getAdminUserIds()[0] || '';
+}
+
+/**
+ * @param {string | number | null | undefined} userId
+ */
+function isAdminUserId(userId) {
+    const id = String(userId ?? '').trim();
+    if (!id) return false;
+    return getAdminUserIds().includes(id);
 }
 
 /**
@@ -86,6 +104,8 @@ module.exports = {
     getSchedulePublishChannelId,
     isScheduleTestMode,
     getAdminUserId,
+    getAdminUserIds,
+    isAdminUserId,
     getChannelFilePost,
     isMonitoredChannelChat
 };

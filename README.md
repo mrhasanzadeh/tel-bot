@@ -71,7 +71,7 @@ docker compose up -d
 
 1. Run `scripts/sql/schedule_schema.sql` on Postgres
 2. `npm run schedule:import-chiramune` — seed Chiramune E01–E13
-3. Set `ADMIN_USER_ID` and `PUBLIC_POSTS_CHANNEL_ID` in `.env`
+3. Set `ADMIN_USER_ID` (comma-separated for multiple admins, e.g. `90344148,57043130`) and `PUBLIC_POSTS_CHANNEL_ID` in `.env`
 4. Upload mkv + zip to archive → admin gets preview → approve to publish new post
 5. **New anime** (no template post yet): after preview, send cover photo to the bot in private chat, then approve
 6. Migrations: `schedule_schema_v3_cover_photo.sql`, `v4_pack_info.sql`, etc. if the DB predates those features

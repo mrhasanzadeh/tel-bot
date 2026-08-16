@@ -21,7 +21,9 @@ const { buildScheduleCaption } = require('./captionBuilderService');
 const {
     getSchedulePublishChannelId,
     isScheduleTestMode,
-    getAdminUserId
+    getAdminUserId,
+    getAdminUserIds,
+    isAdminUserId
 } = require('../utils/channelIds');
 const { parsePackEpisodesSlug, parsePackSubtitleKey } = require('../utils/schedulePackParse');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
@@ -282,18 +284,19 @@ class ScheduleService {
             return;
         }
 
-        const adminId = getAdminUserId();
-        if (!adminId) return;
+        const adminIds = getAdminUserIds();
+        if (!adminIds.length) return;
 
         await getScheduleDb().markAnimeRegistrationAsked(filenameTitle);
-        await ctx.telegram.sendMessage(
-            adminId,
+        const text =
             `${e('clipboard')} <b>انیمه جدید شناسایی شد</b>\n\n` +
-                `روماجی (از نام فایل): <code>${escapeHtml(parsed.title.trim())}</code>\n\n` +
-                `لطفاً <b>اسم انگلیسی انیمه</b> را برای پست کانال در همین چت بفرست.\n` +
-                `(مثلاً: <code>Solo Leveling</code>)`,
-            htmlOpts({ disable_web_page_preview: true })
-        );
+            `روماجی (از نام فایل): <code>${escapeHtml(parsed.title.trim())}</code>\n\n` +
+            `لطفاً <b>اسم انگلیسی انیمه</b> را برای پست کانال در همین چت بفرست.\n` +
+            `(مثلاً: <code>Solo Leveling</code>)`;
+        const opts = htmlOpts({ disable_web_page_preview: true });
+        for (const adminId of adminIds) {
+            await ctx.telegram.sendMessage(adminId, text, opts);
+        }
         console.log(`📋 Schedule: asked admin English title for new anime "${filenameTitle}"`);
     }
 
@@ -410,8 +413,7 @@ class ScheduleService {
     }
 
     async _askRegistrationCoverPhoto(ctx, reg) {
-        const adminId = getAdminUserId();
-        if (!adminId) return;
+        if (!getAdminUserIds().length) return;
 
         await this._replyAdmin(
             ctx,
@@ -549,8 +551,7 @@ class ScheduleService {
      * @returns {Promise<boolean>}
      */
     async handleAdminAnimeRegistration(ctx) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) return false;
+        if (!isAdminUserId(ctx.from?.id)) return false;
 
         const text = ctx.message?.text?.trim();
         if (!text || text.startsWith('/')) return false;
@@ -676,8 +677,7 @@ class ScheduleService {
      * @param {boolean} hasSynopsis
      */
     async handleAnimeRegSynopsisChoice(ctx, hasSynopsis) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await ctx.answerCbQuery('فقط ادمین.');
             return;
         }
@@ -714,8 +714,7 @@ class ScheduleService {
      * @param {'per_episode' | 'pack_only'} mode
      */
     async handleAnimeRegSubtitleModeChoice(ctx, mode) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await ctx.answerCbQuery('فقط ادمین.');
             return;
         }
@@ -744,8 +743,7 @@ class ScheduleService {
      * @param {boolean} hasKaraoke
      */
     async handleAnimeRegKaraokeChoice(ctx, hasKaraoke) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await ctx.answerCbQuery('فقط ادمین.');
             return;
         }
@@ -870,18 +868,19 @@ class ScheduleService {
     }
 
     async _askCoverPhotoBeforePreview(ctx, anime, episode, pendingId) {
-        const adminId = getAdminUserId();
-        if (!adminId) return;
+        const adminIds = getAdminUserIds();
+        if (!adminIds.length) return;
 
-        await ctx.telegram.sendMessage(
-            adminId,
+        const text =
             `${e('clipboard')} <b>عکس پست لازم است</b>\n\n` +
-                `انیمه: <b>${escapeHtml(anime.title)}</b>\n` +
-                `قسمت: E${String(episode).padStart(2, '0')}\n\n` +
-                `برای ساخت پیش‌نمایش، ابتدا <b>عکس پست</b> را در همین چت بفرست.\n` +
-                `بعد از آن پیش‌نمایش با دکمه‌های تأیید ارسال می‌شود.`,
-            htmlOpts({ disable_web_page_preview: true })
-        );
+            `انیمه: <b>${escapeHtml(anime.title)}</b>\n` +
+            `قسمت: E${String(episode).padStart(2, '0')}\n\n` +
+            `برای ساخت پیش‌نمایش، ابتدا <b>عکس پست</b> را در همین چت بفرست.\n` +
+            `بعد از آن پیش‌نمایش با دکمه‌های تأیید ارسال می‌شود.`;
+        const opts = htmlOpts({ disable_web_page_preview: true });
+        for (const adminId of adminIds) {
+            await ctx.telegram.sendMessage(adminId, text, opts);
+        }
     }
 
     /**
@@ -906,18 +905,28 @@ class ScheduleService {
             `<i>متن پست کانال (همان چیزی که منتشر می‌شود):</i>\n\n` +
             caption;
 
-        const adminId = getAdminUserId();
-        const sent = await ctx.telegram.sendMessage(adminId, previewText, {
+        const adminIds = getAdminUserIds();
+        if (!adminIds.length) return;
+
+        const opts = {
             ...htmlOpts({ disable_web_page_preview: true }),
             reply_markup: this._previewKeyboard(pending.id, false)
-        });
+        };
 
-        await getScheduleDb().updatePending(pending.id, {
-            adminPreviewChatId: sent.chat.id,
-            adminPreviewMessageId: sent.message_id
-        });
+        let firstSent = null;
+        for (const adminId of adminIds) {
+            const sent = await ctx.telegram.sendMessage(adminId, previewText, opts);
+            if (!firstSent) firstSent = sent;
+        }
 
-        console.log(`📋 Schedule preview sent to admin pending=${pending.id}`);
+        if (firstSent) {
+            await getScheduleDb().updatePending(pending.id, {
+                adminPreviewChatId: firstSent.chat.id,
+                adminPreviewMessageId: firstSent.message_id
+            });
+        }
+
+        console.log(`📋 Schedule preview sent to admin(s) pending=${pending.id}`);
     }
 
     /**
@@ -926,8 +935,7 @@ class ScheduleService {
      * @returns {Promise<boolean>}
      */
     async handleAdminCoverPhoto(ctx) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) return false;
+        if (!isAdminUserId(ctx.from?.id)) return false;
 
         const fileId = this._extractPhotoFileId(ctx.message);
         if (!fileId) return false;
@@ -982,8 +990,7 @@ class ScheduleService {
      * @returns {Promise<boolean>}
      */
     async handleAdminPackInfo(ctx) {
-        const adminId = getAdminUserId();
-        if (!adminId || String(ctx.from?.id) !== adminId) return false;
+        if (!isAdminUserId(ctx.from?.id)) return false;
         if (!this.isEnabled()) return false;
 
         const text = ctx.message?.text?.trim();
@@ -1114,8 +1121,7 @@ class ScheduleService {
      * @param {'approve' | 'complete' | 'reject'} action
      */
     async handleApproval(ctx, pendingId, action) {
-        const adminId = getAdminUserId();
-        if (String(ctx.from?.id) !== adminId) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await ctx.answerCbQuery('فقط ادمین می‌تواند تأیید کند.', { show_alert: true });
             return;
         }
@@ -1273,8 +1279,7 @@ class ScheduleService {
      * @param {number} pendingId
      */
     async handleRepublish(ctx, pendingId) {
-        const adminId = getAdminUserId();
-        if (String(ctx.from?.id) !== adminId) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await ctx.answerCbQuery('فقط ادمین می‌تواند تأیید کند.', { show_alert: true });
             return;
         }
@@ -1442,18 +1447,24 @@ class ScheduleService {
     }
 
     async _notifyAdmin(ctx, text) {
-        const adminId = getAdminUserId();
-        if (!adminId) return;
-        await ctx.telegram.sendMessage(adminId, text, htmlOpts());
+        const adminIds = getAdminUserIds();
+        if (!adminIds.length) return;
+        const opts = htmlOpts();
+        for (const adminId of adminIds) {
+            await ctx.telegram.sendMessage(adminId, text, opts);
+        }
     }
 
     async _replyAdmin(ctx, text, opts = {}) {
-        const adminId = getAdminUserId();
-        if (!adminId) return;
+        const adminIds = getAdminUserIds();
+        if (!adminIds.length) return;
         const options = htmlOpts(opts);
-        if (String(ctx.chat?.id) === String(adminId)) {
+        const chatId = String(ctx.chat?.id ?? '');
+        if (adminIds.includes(chatId)) {
             await ctx.reply(text, options);
-        } else {
+            return;
+        }
+        for (const adminId of adminIds) {
             await ctx.telegram.sendMessage(adminId, text, options);
         }
     }

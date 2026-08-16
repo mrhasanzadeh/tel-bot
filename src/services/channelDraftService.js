@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const { sendPhotoWithHtmlCaption } = require('../utils/captionEntities');
-const { getAdminUserId } = require('../utils/channelIds');
+const { getAdminUserId, getAdminUserIds, isAdminUserId } = require('../utils/channelIds');
 
 /** @typedef {{
  *   coverFileId: string,
@@ -262,8 +262,7 @@ async function startBindFromPayload(ctx, payload, rawQuery = '') {
  * @returns {Promise<boolean>}
  */
 async function offerAdminForwardActions(ctx) {
-    const adminId = getAdminUserId();
-    if (!adminId || String(ctx.from?.id) !== String(adminId)) return false;
+    if (!isAdminUserId(ctx.from?.id)) return false;
     if (ctx.chat?.type !== 'private') return false;
 
     const message = ctx.message;
@@ -353,8 +352,7 @@ async function offerAdminForwardActions(ctx) {
  * @param {string} [sessionId]
  */
 async function handleAdminForwardAction(ctx, action, sessionId) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
@@ -393,7 +391,7 @@ async function handleAdminForwardAction(ctx, action, sessionId) {
 
     if (action === 'close') {
         pendingForwardActions.delete(sessionId);
-        pendingSearchByAdmin.delete(String(adminId));
+        pendingSearchByAdmin.delete(String(ctx.from.id));
         await ctx.answerCbQuery('بسته شد');
         try {
             await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
@@ -420,7 +418,7 @@ async function handleAdminForwardAction(ctx, action, sessionId) {
     if (action === 'search') {
         session.awaitQuery = true;
         session.expiresAt = Date.now() + BIND_TTL_MS;
-        pendingSearchByAdmin.set(String(adminId), sessionId);
+        pendingSearchByAdmin.set(String(ctx.from.id), sessionId);
         await ctx.answerCbQuery();
         await ctx.reply(
             `${e('search')} نام یا slug انیمه را همین‌جا بفرست (مثلاً <code>dandadan</code>).`,
@@ -439,7 +437,7 @@ async function handleAdminForwardAction(ctx, action, sessionId) {
         const ok = await startBindFromPayload(ctx, session);
         if (ok) {
             pendingForwardActions.delete(sessionId);
-            pendingSearchByAdmin.delete(String(adminId));
+            pendingSearchByAdmin.delete(String(ctx.from.id));
         }
         return;
     }
@@ -453,24 +451,24 @@ async function handleAdminForwardAction(ctx, action, sessionId) {
  * @returns {Promise<boolean>}
  */
 async function handleAdminPendingSearchQuery(ctx) {
-    const adminId = getAdminUserId();
-    if (!adminId || String(ctx.from?.id) !== String(adminId)) return false;
+    if (!isAdminUserId(ctx.from?.id)) return false;
     if (ctx.chat?.type !== 'private') return false;
 
     const raw = String(ctx.message?.text ?? '').trim();
     if (!raw || raw.startsWith('/')) return false;
 
     pruneExpiredBinds();
-    const sessionId = pendingSearchByAdmin.get(String(adminId));
+    const adminKey = String(ctx.from.id);
+    const sessionId = pendingSearchByAdmin.get(adminKey);
     if (!sessionId) return false;
 
     const session = pendingForwardActions.get(sessionId);
     if (!session || !session.awaitQuery) {
-        pendingSearchByAdmin.delete(String(adminId));
+        pendingSearchByAdmin.delete(adminKey);
         return false;
     }
 
-    pendingSearchByAdmin.delete(String(adminId));
+    pendingSearchByAdmin.delete(adminKey);
     session.awaitQuery = false;
     const ok = await startBindFromPayload(ctx, session, raw);
     if (ok) pendingForwardActions.delete(sessionId);
@@ -558,8 +556,7 @@ async function sendSearchResults(ctx, session, bindId) {
  * @param {import('telegraf').Context} ctx
  */
 async function handleBindChannelPost(ctx) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.reply(`${e('error')} این دستور فقط برای ادمین است.`, htmlOpts());
         return;
     }
@@ -594,8 +591,7 @@ async function handleBindChannelPost(ctx) {
  * @param {string} animeId
  */
 async function handleBindPickCallback(ctx, bindId, animeId) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
@@ -642,8 +638,7 @@ async function handleBindPickCallback(ctx, bindId, animeId) {
  * @param {string} bindId
  */
 async function handleBindRetryCallback(ctx, bindId) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
@@ -683,8 +678,7 @@ async function handleBindRetryCallback(ctx, bindId) {
  * @param {string} bindId
  */
 async function handleBindCancelCallback(ctx, bindId) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
@@ -705,8 +699,7 @@ async function handleBindCancelCallback(ctx, bindId) {
  * @param {'publish' | 'reject'} action
  */
 async function handleChannelDraftCallback(ctx, draftId, action) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
@@ -786,8 +779,8 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
  * @param {import('telegraf').Telegraf} bot
  */
 async function deliverPendingChannelDraftPreviews(bot) {
-    const adminId = getAdminUserId();
-    if (!adminId) {
+    const adminIds = getAdminUserIds();
+    if (!adminIds.length) {
         console.warn(
             '📋 Channel draft poller: ADMIN_USER_ID missing on tel-bot — cannot DM previews'
         );
@@ -818,12 +811,15 @@ async function deliverPendingChannelDraftPreviews(bot) {
         const draftId = item.id;
         const cover = item.cover_file_id;
         const caption = item.proposed_caption;
-        const chatId = String(
-            item.admin_user_id || item.admin_preview_chat_id || adminId
-        ).trim();
-        if (!draftId || !cover || !caption || !chatId) {
+
+        const fromApi = Array.isArray(item.admin_user_ids)
+            ? item.admin_user_ids.map((id) => String(id).trim()).filter(Boolean)
+            : [];
+        const targets = [...new Set(fromApi.length ? fromApi : adminIds)];
+
+        if (!draftId || !cover || !caption || !targets.length) {
             console.warn(
-                `📋 skip draft=${draftId || '?'} missing fields cover=${Boolean(cover)} caption=${Boolean(caption)} chat=${chatId}`
+                `📋 skip draft=${draftId || '?'} missing fields cover=${Boolean(cover)} caption=${Boolean(caption)} targets=${targets.length}`
             );
             if (draftId) {
                 try {
@@ -842,25 +838,48 @@ async function deliverPendingChannelDraftPreviews(bot) {
         }
 
         try {
-            await bot.telegram.sendMessage(
-                chatId,
-                `پیش‌نویس پست کانال\n` +
-                    `<b>${escapeHtml(String(item.anime_title || ''))}</b> — قسمت ${escapeHtml(String(item.episode_number ?? ''))}\n` +
-                    `تأیید → انتشار در کانال`,
-                htmlOpts()
-            );
+            /** @type {{ chatId: string, messageId: number } | null} */
+            let ack = null;
+            const errors = [];
 
-            const preview = await sendPhotoWithHtmlCaption(
-                bot.telegram,
-                chatId,
-                cover,
-                caption,
-                { reply_markup: item.draft_keyboard || undefined }
-            );
+            for (const chatId of targets) {
+                try {
+                    await bot.telegram.sendMessage(
+                        chatId,
+                        `پیش‌نویس پست کانال\n` +
+                            `<b>${escapeHtml(String(item.anime_title || ''))}</b> — قسمت ${escapeHtml(String(item.episode_number ?? ''))}\n` +
+                            `تأیید → انتشار در کانال`,
+                        htmlOpts()
+                    );
 
-            const messageId = preview?.message_id;
-            if (!messageId) {
-                console.warn(`📋 preview send missing message_id draft=${draftId}`);
+                    const preview = await sendPhotoWithHtmlCaption(
+                        bot.telegram,
+                        chatId,
+                        cover,
+                        caption,
+                        { reply_markup: item.draft_keyboard || undefined }
+                    );
+
+                    const messageId = preview?.message_id;
+                    if (messageId && !ack) {
+                        ack = { chatId, messageId };
+                    }
+                    console.log(
+                        `📋 Channel draft preview delivered draft=${draftId} → ${chatId}`
+                    );
+                } catch (sendErr) {
+                    const msg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+                    errors.push(`${chatId}: ${msg}`);
+                    console.warn(
+                        `📋 preview send failed draft=${draftId} chat=${chatId}: ${msg}`
+                    );
+                }
+            }
+
+            if (!ack) {
+                console.warn(
+                    `📋 preview send failed for all admins draft=${draftId}: ${errors.join('; ')}`
+                );
                 try {
                     await shioriApi.post(
                         `/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`
@@ -873,12 +892,10 @@ async function deliverPendingChannelDraftPreviews(bot) {
 
             await shioriApi.post(
                 `/bot/channel-drafts/${encodeURIComponent(draftId)}/ack-preview`,
-                { chat_id: chatId, message_id: messageId }
+                { chat_id: ack.chatId, message_id: ack.messageId }
             );
-            console.log(`📋 Channel draft preview delivered draft=${draftId} → ${chatId}`);
         } catch (error) {
             console.error(`📋 channel draft preview failed draft=${draftId}:`, error.message);
-            // Drop from queue so one bad draft cannot block forever
             try {
                 await shioriApi.post(
                     `/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`
@@ -914,7 +931,7 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
         void tick();
     }, intervalMs);
     console.log(
-        `📋 Channel draft preview poller started (${intervalMs}ms) admin=${getAdminUserId() || 'MISSING'}`
+        `📋 Channel draft preview poller started (${intervalMs}ms) admins=${getAdminUserIds().join(',') || 'MISSING'}`
     );
     return timer;
 }
@@ -924,8 +941,7 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
  * @param {import('telegraf').Context} ctx
  */
 async function handleClearChannelDrafts(ctx) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.reply(`${e('error')} این دستور فقط برای ادمین است.`, htmlOpts());
         return;
     }
@@ -953,8 +969,7 @@ async function handleClearChannelDrafts(ctx) {
  * @param {import('telegraf').Context} ctx
  */
 async function handleFlushChannelDrafts(bot, ctx) {
-    const adminId = getAdminUserId();
-    if (String(ctx.from?.id) !== String(adminId)) {
+    if (!isAdminUserId(ctx.from?.id)) {
         await ctx.reply(`${e('error')} این دستور فقط برای ادمین است.`, htmlOpts());
         return;
     }

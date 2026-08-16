@@ -10,6 +10,7 @@ const {
     getArchiveChannelId,
     getPrivateChannelId,
     getAdminUserId,
+    isAdminUserId,
     normalizeChatId
 } = require('../utils/channelIds');
 const { e } = require('../utils/premiumEmoji');
@@ -207,7 +208,7 @@ function setupHandlers(bot) {
         if (ctx.chat?.type !== 'private') return next();
 
         const adminId = getAdminUserId();
-        if (adminId && String(ctx.from?.id) === adminId) return next();
+        if (adminId && isAdminUserId(ctx.from?.id)) return next();
 
         const callbackData = ctx.callbackQuery?.data ?? '';
         if (callbackData.startsWith('check_membership_')) return next();
@@ -271,7 +272,7 @@ function setupHandlers(bot) {
 
     bot.command('checkchannels', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -286,7 +287,7 @@ function setupHandlers(bot) {
 
     bot.command('link_catalog', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -386,7 +387,7 @@ function setupHandlers(bot) {
 
     bot.command('mirroring', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -467,7 +468,7 @@ function setupHandlers(bot) {
 
     bot.command('security', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -482,7 +483,7 @@ function setupHandlers(bot) {
 
     bot.command('clearchwebhook', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -504,7 +505,7 @@ function setupHandlers(bot) {
 
     bot.command('chatid', async (ctx) => {
         if (ctx.chat?.type !== 'private') return;
-        if (String(ctx.from?.id) !== getAdminUserId()) {
+        if (!isAdminUserId(ctx.from?.id)) {
             await botReply.reply(ctx, `${e('error')} این دستور فقط برای ادمین است.`);
             return;
         }
@@ -675,7 +676,7 @@ function setupHandlers(bot) {
     bot.on(['photo', 'document'], async (ctx) => {
         try {
             if (isMonitoredChannelChat(ctx)) return;
-            if (String(ctx.from?.id) !== getAdminUserId()) return;
+            if (!isAdminUserId(ctx.from?.id)) return;
             if (ctx.chat?.type === 'private') {
                 const offered = await offerAdminForwardActions(ctx);
                 if (offered) return;
@@ -695,7 +696,7 @@ function setupHandlers(bot) {
             // Let bot.command handlers own slash commands (and avoid schedule DB when API-only).
             if (rawText.startsWith('/')) return;
 
-            if (String(ctx.from.id) === getAdminUserId()) {
+            if (isAdminUserId(ctx.from.id)) {
                 const handledSearch = await handleAdminPendingSearchQuery(ctx);
                 if (handledSearch) return;
 
