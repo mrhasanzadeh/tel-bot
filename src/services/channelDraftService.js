@@ -817,17 +817,51 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             throw new Error('publish payload incomplete');
         }
 
-        const sent = await sendPhotoWithHtmlCaption(
-            ctx.telegram,
-            targetChannelId,
-            cover,
-            caption,
-            { reply_markup: prepared.reply_markup || undefined }
-        );
+        // Prefer copying the admin preview message so premium custom_emoji entities
+        // stay intact (re-send via HTML/entities often falls back and drops them).
+        const previewChatId =
+            ctx.callbackQuery?.message?.chat?.id ??
+            prepared.draft?.admin_preview_chat_id ??
+            null;
+        const previewMessageId =
+            ctx.callbackQuery?.message?.message_id ??
+            prepared.draft?.admin_preview_message_id ??
+            null;
 
-        const messageId = sent?.message_id;
+        let messageId = null;
+        if (previewChatId != null && previewMessageId != null) {
+            try {
+                const copied = await ctx.telegram.copyMessage(
+                    targetChannelId,
+                    previewChatId,
+                    Number(previewMessageId),
+                    {
+                        reply_markup:
+                            prepared.reply_markup || { inline_keyboard: [] }
+                    }
+                );
+                messageId = copied?.message_id ?? null;
+            } catch (copyErr) {
+                const msg = copyErr instanceof Error ? copyErr.message : String(copyErr);
+                console.warn(
+                    `channel draft copyMessage failed draft=${draftId}: ${msg}; falling back to sendPhoto`
+                );
+            }
+        }
+
         if (!messageId) {
-            throw new Error('sendPhoto returned no message_id');
+            const sent = await sendPhotoWithHtmlCaption(
+                ctx.telegram,
+                targetChannelId,
+                cover,
+                caption,
+                { reply_markup: prepared.reply_markup || undefined }
+            );
+            messageId = sent?.message_id ?? null;
+        }
+
+        if (!messageId) {
+            throw new Error('publish returned no message_id');
         }
 
         await shioriApi.post(

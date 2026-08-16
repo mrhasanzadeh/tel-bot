@@ -247,7 +247,19 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendPhoto entities failed: ${msg}; retry without custom_emoji`);
+        console.warn(`sendPhoto entities failed: ${msg}; trying HTML tg-emoji`);
+    }
+
+    // Keep premium emoji via HTML tags before stripping custom_emoji entities.
+    try {
+        return await telegram.sendPhoto(chatId, photo, {
+            caption: String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX),
+            parse_mode: 'HTML',
+            ...base
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`sendPhoto HTML(tg-emoji) failed: ${msg}; retry without custom_emoji`);
     }
 
     try {
@@ -261,22 +273,7 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendPhoto entities(no custom) failed: ${msg}; trying HTML`);
-    }
-
-    try {
-        const escaped = entityOpts.caption
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        return await telegram.sendPhoto(chatId, photo, {
-            caption: escaped,
-            parse_mode: 'HTML',
-            ...base
-        });
-    } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendPhoto HTML failed: ${msg}; trying plain caption`);
+        console.warn(`sendPhoto entities(no custom) failed: ${msg}; trying plain caption`);
     }
 
     return telegram.sendPhoto(chatId, photo, {
