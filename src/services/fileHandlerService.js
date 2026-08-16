@@ -374,6 +374,62 @@ class FileHandlerService {
     }
 
     /**
+     * Deliver a stored file to the current chat.
+     * Prefer copyMessage from PRIVATE_CHANNEL_ID; fall back to file_id if the message is gone.
+     * @param {import('telegraf').Context} ctx
+     * @param {{ messageId?: number | null, fileId?: string | null, type?: string | null }} fileData
+     * @returns {Promise<{ message_id: number }>}
+     */
+    async _deliverStoredFile(ctx, fileData) {
+        const privateChannelId = config.PRIVATE_CHANNEL_ID;
+        const messageId = Number(fileData?.messageId);
+        const fileId = String(fileData?.fileId ?? '').trim();
+        const type = String(fileData?.type ?? '').trim().toLowerCase();
+
+        if (privateChannelId && Number.isFinite(messageId) && messageId > 0) {
+            try {
+                return await ctx.telegram.copyMessage(
+                    ctx.chat.id,
+                    privateChannelId,
+                    messageId,
+                    { caption: '' }
+                );
+            } catch (error) {
+                const desc = String(
+                    error?.response?.description || error?.message || ''
+                ).toLowerCase();
+                const missing =
+                    desc.includes('message to copy not found') ||
+                    desc.includes('message to be replied not found') ||
+                    desc.includes('not found');
+                if (!missing || !fileId) {
+                    throw error;
+                }
+                console.warn(
+                    `⚠️ copyMessage failed for message_id=${messageId}; falling back to file_id`
+                );
+            }
+        }
+
+        if (!fileId) {
+            throw new Error('file has no message_id in private channel and no file_id fallback');
+        }
+
+        const emptyCaption = { caption: '' };
+        if (type === 'photo') {
+            return ctx.telegram.sendPhoto(ctx.chat.id, fileId, emptyCaption);
+        }
+        if (type === 'video') {
+            return ctx.telegram.sendVideo(ctx.chat.id, fileId, emptyCaption);
+        }
+        if (type === 'audio') {
+            return ctx.telegram.sendAudio(ctx.chat.id, fileId, emptyCaption);
+        }
+        // document / unknown — sendDocument works for most archive uploads
+        return ctx.telegram.sendDocument(ctx.chat.id, fileId, emptyCaption);
+    }
+
+    /**
      * Send a file to user based on file key
      * @param {Object} ctx - Telegram context
      * @param {string} fileKey - The file key
@@ -401,12 +457,7 @@ class FileHandlerService {
             let forwardedMessage;
             let noticeMessage;
             try {
-                forwardedMessage = await ctx.telegram.copyMessage(
-                    ctx.chat.id,
-                    config.PRIVATE_CHANNEL_ID,
-                    fileData.messageId,
-                    { caption: '' }
-                );
+                forwardedMessage = await this._deliverStoredFile(ctx, fileData);
                 console.log('✅ File sent successfully');
 
                 noticeMessage = await botReply.reply(
@@ -416,7 +467,7 @@ class FileHandlerService {
             } catch (error) {
                 const desc = String(error?.response?.description || error?.message || '').toLowerCase();
                 console.error('❌ Error copying message:', error?.response?.description || error);
-                if (desc.includes('not found') || desc.includes("can't be found")) {
+                if (desc.includes('not found') || desc.includes("can't be found") || desc.includes('no file_id')) {
                     await botReply.reply(
                         ctx,
                         `${e('warning')} فایل در کانال ذخیره‌سازی پیدا نشد (message_id نامعتبر). لطفاً با ادمین تماس بگیرید.`
@@ -529,6 +580,7 @@ class FileHandlerService {
             );
 
             let sent = 0;
+            let failed = 0;
             let stopNotified = false;
             const filesToDelete = [];
             const packDeleteDelayLabel = formatPackDeleteDelayFa(PACK_FILE_DELETE_MS);
@@ -551,6 +603,8 @@ class FileHandlerService {
 
                     const fileData = await databaseService.getFileByKey(fileKey);
                     if (!fileData || !fileData.isActive) {
+                        failed += 1;
+                        console.warn(`📦 pack item missing/inactive key=${fileKey}`);
                         continue;
                     }
 
@@ -560,12 +614,7 @@ class FileHandlerService {
                             return true;
                         }
 
-                        const forwardedMessage = await ctx.telegram.copyMessage(
-                            ctx.chat.id,
-                            config.PRIVATE_CHANNEL_ID,
-                            fileData.messageId,
-                            { caption: '' }
-                        );
+                        const forwardedMessage = await this._deliverStoredFile(ctx, fileData);
 
                         sent += 1;
                         filesToDelete.push(forwardedMessage.message_id);
@@ -578,17 +627,31 @@ class FileHandlerService {
 
                         await delayCancellable(1200, cancelToken);
                     } catch (err) {
-                        console.error('❌ Error sending pack file:', err);
+                        failed += 1;
+                        console.error(
+                            `❌ Error sending pack file key=${fileKey} messageId=${fileData.messageId}:`,
+                            err?.response?.description || err.message || err
+                        );
                         await delayCancellable(1500, cancelToken);
                     }
                 }
 
                 if (cancelToken?.cancelled) {
                     await notifyStopped();
-                } else {
+                } else if (sent === 0) {
                     await botReply.reply(
                         ctx,
-                        `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})\n\n` +
+                        `${e('error')} هیچ فایلی از این پک ارسال نشد.\n` +
+                            `احتمالاً پیام‌ها از کانال ذخیره‌سازی حذف شده‌اند یا message_id نامعتبر است.`
+                    );
+                } else {
+                    const failNote =
+                        failed > 0
+                            ? `\n${e('warning')} ${failed} فایل ارسال نشد.`
+                            : '';
+                    await botReply.reply(
+                        ctx,
+                        `${e('success')} ارسال پک تمام شد. (${sent}/${items.length})${failNote}\n\n` +
                             `${e('timer')} فایل‌های ارسالی ربات ${packDeleteDelayLabel} بعد از اتمام ارسال پک از چت پاک می‌شوند.\n\n` +
                             `${e('warning')} جهت دانلود فایل‌ را به پیام‌های ذخیره‌شده‌ی تلگرام یا چت دیگری فوروارد کنید.`
                     );
