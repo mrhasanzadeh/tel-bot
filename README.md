@@ -83,7 +83,8 @@ docker compose up -d
 - `/checkchannels` — verify bot access to configured channels
 - `/chatid` — reply to a forwarded channel post to see its chat id
 - `/link_catalog <schedule_slug> <catalog_slug>` — link schedule anime to catalog for mini-app channel button
-- `/bind_channel_post` — reply to a forwarded channel post; bot searches the catalog and lets you pick the anime (optional query: `/bind_channel_post dandadan`)
+- Forward a channel post to the bot DM as admin → inline action menu (bind template, search by name, clear/flush draft queue, channel id)
+- `/bind_channel_post` — fallback: reply to a forwarded channel post; bot searches the catalog and lets you pick the anime (optional query: `/bind_channel_post dandadan`)
 - `/flush_channel_drafts` — immediately deliver queued channel post previews
 - `/clear_channel_drafts` — reject all pending drafts still waiting for preview (clear stuck queue)
 

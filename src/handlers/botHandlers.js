@@ -28,7 +28,10 @@ const {
     handleBindCancelCallback,
     handleChannelDraftCallback,
     handleClearChannelDrafts,
-    handleFlushChannelDrafts
+    handleFlushChannelDrafts,
+    offerAdminForwardActions,
+    handleAdminForwardAction,
+    handleAdminPendingSearchQuery
 } = require('../services/channelDraftService');
 
 // Store pending links for non-member users
@@ -356,6 +359,24 @@ function setupHandlers(bot) {
         }
     });
 
+    // Admin forward action menu: af:bind|search|cid|close:<id> or af:clearq|flushq
+    bot.action(/^af:(bind|search|cid|close):([a-f0-9]{8})$/i, async (ctx) => {
+        try {
+            await handleAdminForwardAction(ctx, String(ctx.match[1]).toLowerCase(), ctx.match[2]);
+        } catch (error) {
+            console.error('admin_forward_action error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+    bot.action(/^af:(clearq|flushq)$/i, async (ctx) => {
+        try {
+            await handleAdminForwardAction(ctx, String(ctx.match[1]).toLowerCase());
+        } catch (error) {
+            console.error('admin_forward_queue_action error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+
     bot.action(/^chdraft_ok_([0-9a-f-]{36})$/i, async (ctx) => {
         await handleChannelDraftCallback(ctx, ctx.match[1], 'publish');
     });
@@ -650,14 +671,18 @@ function setupHandlers(bot) {
         await handlePackCancelRequest(ctx, String(ctx.from.id));
     });
 
-    // Schedule cover photo from admin (new anime without template post)
+    // Admin: channel post forward → action menu; else schedule cover photo
     bot.on(['photo', 'document'], async (ctx) => {
         try {
             if (isMonitoredChannelChat(ctx)) return;
             if (String(ctx.from?.id) !== getAdminUserId()) return;
+            if (ctx.chat?.type === 'private') {
+                const offered = await offerAdminForwardActions(ctx);
+                if (offered) return;
+            }
             await scheduleService.handleAdminCoverPhoto(ctx);
         } catch (error) {
-            console.error('❌ Schedule cover photo handler:', error);
+            console.error('❌ Schedule cover photo / admin forward handler:', error);
         }
     });
 
@@ -671,6 +696,9 @@ function setupHandlers(bot) {
             if (rawText.startsWith('/')) return;
 
             if (String(ctx.from.id) === getAdminUserId()) {
+                const handledSearch = await handleAdminPendingSearchQuery(ctx);
+                if (handledSearch) return;
+
                 const handledReg = await scheduleService.handleAdminAnimeRegistration(ctx);
                 if (handledReg) return;
 

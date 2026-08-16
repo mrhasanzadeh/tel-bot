@@ -18,10 +18,35 @@ const BIND_TTL_MS = 10 * 60 * 1000;
 /** @type {Map<string, BindSession>} */
 const pendingBinds = new Map();
 
+/** @typedef {{
+ *   coverFileId: string,
+ *   captionText: string,
+ *   captionEntities: unknown[],
+ *   channelId: string,
+ *   channelMessageId: number | string | null,
+ *   expiresAt: number,
+ *   awaitQuery?: boolean
+ * }} ForwardActionSession */
+
+/** @type {Map<string, ForwardActionSession>} */
+const pendingForwardActions = new Map();
+
+/** admin user id → forward session id (waiting for typed anime name) */
+/** @type {Map<string, string>} */
+const pendingSearchByAdmin = new Map();
+
 function pruneExpiredBinds() {
     const now = Date.now();
     for (const [id, session] of pendingBinds) {
         if (session.expiresAt <= now) pendingBinds.delete(id);
+    }
+    for (const [id, session] of pendingForwardActions) {
+        if (session.expiresAt <= now) pendingForwardActions.delete(id);
+    }
+    for (const [adminId, sessionId] of pendingSearchByAdmin) {
+        if (!pendingForwardActions.has(sessionId)) {
+            pendingSearchByAdmin.delete(adminId);
+        }
     }
 }
 
@@ -115,6 +140,344 @@ function extractChannelPostPayload(message) {
 }
 
 /**
+ * @param {import('telegraf/types').Message | undefined} message
+ */
+function isChannelForwardMessage(message) {
+    if (!message) return false;
+    if (message.forward_from_chat?.type === 'channel') return true;
+    if (message.forward_origin?.type === 'channel') return true;
+    return false;
+}
+
+/**
+ * @param {{ channelId?: string | null }} payload
+ */
+function resolveChannelId(payload) {
+    const config = require('../../config');
+    return (
+        String(payload?.channelId ?? '').trim() ||
+        String(config.PUBLIC_POSTS_CHANNEL_ID || config.ADDITIONAL_CHANNEL_ID || '').trim() ||
+        null
+    );
+}
+
+/**
+ * Start bind search/picker from an already-extracted channel post payload.
+ * @param {import('telegraf').Context} ctx
+ * @param {{
+ *   coverFileId: string,
+ *   captionText: string,
+ *   captionEntities: unknown[],
+ *   channelId: string | null,
+ *   channelMessageId: number | string | null
+ * }} payload
+ * @param {string} [rawQuery]
+ */
+async function startBindFromPayload(ctx, payload, rawQuery = '') {
+    const channelId = resolveChannelId(payload);
+    if (!channelId) {
+        await ctx.reply(
+            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن ` +
+                `یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
+            htmlOpts()
+        );
+        return false;
+    }
+
+    const query =
+        String(rawQuery ?? '').trim() ||
+        extractSearchQueryFromCaption(payload.captionText, payload.captionEntities);
+
+    if (!query) {
+        await ctx.reply(
+            `${e('warning')} عنوان از کپشن استخراج نشد. از دکمه «جستجو با نام» استفاده کن ` +
+                `یا:\n<code>/bind_channel_post نام-انیمه</code>`,
+            htmlOpts()
+        );
+        return false;
+    }
+
+    pruneExpiredBinds();
+    const bindId = createBindId();
+    /** @type {BindSession} */
+    const session = {
+        coverFileId: payload.coverFileId,
+        captionText: payload.captionText,
+        captionEntities: payload.captionEntities,
+        channelId,
+        channelMessageId: payload.channelMessageId,
+        query,
+        expiresAt: Date.now() + BIND_TTL_MS
+    };
+    pendingBinds.set(bindId, session);
+
+    const rawArg = String(rawQuery ?? '').trim();
+    // Backward-compatible: if arg looks like a known slug/id, try direct bind first.
+    if (rawArg && !/\s/.test(rawArg)) {
+        try {
+            const search = await shioriApi.get(
+                `/bot/anime/search?q=${encodeURIComponent(rawArg)}&limit=8`
+            );
+            const items = Array.isArray(search?.items) ? search.items : [];
+            const exact = items.find(
+                (it) =>
+                    String(it.slug || '').toLowerCase() === rawArg.toLowerCase() ||
+                    String(it.id || '').toLowerCase() === rawArg.toLowerCase()
+            );
+
+            if (exact && items.length === 1) {
+                const result = await putChannelTemplate(session, exact.id);
+                pendingBinds.delete(bindId);
+                await ctx.reply(
+                    `${e('success')} قالب کانال ذخیره شد.\n` +
+                        `<b>${escapeHtml(result?.title || exact.title || rawArg)}</b>\n` +
+                        `slug: <code>${escapeHtml(result?.slug || exact.slug || rawArg)}</code>\n` +
+                        `بعد از افزودن قسمت، از پنل دکمه «پیش‌نویس کانال» را بزن.`,
+                    htmlOpts()
+                );
+                return true;
+            }
+        } catch (error) {
+            console.warn('bind direct lookup failed, showing picker:', error.message);
+        }
+    }
+
+    try {
+        await sendSearchResults(ctx, session, bindId);
+        return true;
+    } catch (error) {
+        pendingBinds.delete(bindId);
+        console.error('bind search error:', error);
+        await ctx.reply(
+            `${e('error')} خطا در جستجو: ${escapeHtml(error.message)}`,
+            htmlOpts()
+        );
+        return false;
+    }
+}
+
+/**
+ * Auto menu when admin forwards a channel post into the bot DM.
+ * @param {import('telegraf').Context} ctx
+ * @returns {Promise<boolean>}
+ */
+async function offerAdminForwardActions(ctx) {
+    const adminId = getAdminUserId();
+    if (!adminId || String(ctx.from?.id) !== String(adminId)) return false;
+    if (ctx.chat?.type !== 'private') return false;
+
+    const message = ctx.message;
+    if (!isChannelForwardMessage(message)) return false;
+
+    const payload = extractChannelPostPayload(message);
+    if (!payload) return false;
+
+    const channelId = resolveChannelId(payload);
+    if (!channelId) {
+        await ctx.reply(
+            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن.`,
+            htmlOpts()
+        );
+        return true;
+    }
+
+    pruneExpiredBinds();
+    const sessionId = createBindId();
+    pendingForwardActions.set(sessionId, {
+        coverFileId: payload.coverFileId,
+        captionText: payload.captionText,
+        captionEntities: payload.captionEntities,
+        channelId,
+        channelMessageId: payload.channelMessageId,
+        expiresAt: Date.now() + BIND_TTL_MS,
+        awaitQuery: false
+    });
+
+    const hint = extractSearchQueryFromCaption(
+        payload.captionText,
+        payload.captionEntities
+    );
+
+    await ctx.reply(
+        `${e('clipboard')} <b>پست کانال دریافت شد</b>\n` +
+            (hint
+                ? `عنوان پیشنهادی: <code>${escapeHtml(hint)}</code>\n`
+                : '') +
+            `یکی از گزینه‌ها را انتخاب کن:`,
+        {
+            ...htmlOpts(),
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        {
+                            text: '🔗 وصل قالب به انیمه',
+                            callback_data: `af:bind:${sessionId}`
+                        }
+                    ],
+                    [
+                        {
+                            text: '🔎 جستجو با نام…',
+                            callback_data: `af:search:${sessionId}`
+                        }
+                    ],
+                    [
+                        {
+                            text: '🧹 خالی کردن صف پیش‌نویس',
+                            callback_data: 'af:clearq'
+                        },
+                        {
+                            text: '⚡ ارسال فوری صف',
+                            callback_data: 'af:flushq'
+                        }
+                    ],
+                    [
+                        {
+                            text: '🆔 شناسه کانال',
+                            callback_data: `af:cid:${sessionId}`
+                        },
+                        {
+                            text: '❌ بستن',
+                            callback_data: `af:close:${sessionId}`
+                        }
+                    ]
+                ]
+            }
+        }
+    );
+    return true;
+}
+
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {string} action
+ * @param {string} [sessionId]
+ */
+async function handleAdminForwardAction(ctx, action, sessionId) {
+    const adminId = getAdminUserId();
+    if (String(ctx.from?.id) !== String(adminId)) {
+        await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
+        return;
+    }
+
+    pruneExpiredBinds();
+
+    if (action === 'clearq') {
+        await ctx.answerCbQuery('در حال پاک‌سازی...');
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch {
+            /* ignore */
+        }
+        await handleClearChannelDrafts(ctx);
+        return;
+    }
+
+    if (action === 'flushq') {
+        await ctx.answerCbQuery('در حال ارسال صف...');
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch {
+            /* ignore */
+        }
+        await handleFlushChannelDrafts({ telegram: ctx.telegram }, ctx);
+        return;
+    }
+
+    const session = sessionId ? pendingForwardActions.get(sessionId) : null;
+    if (!session) {
+        await ctx.answerCbQuery('منقضی شده — پست را دوباره فوروارد کن.', {
+            show_alert: true
+        });
+        return;
+    }
+
+    if (action === 'close') {
+        pendingForwardActions.delete(sessionId);
+        pendingSearchByAdmin.delete(String(adminId));
+        await ctx.answerCbQuery('بسته شد');
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch {
+            /* ignore */
+        }
+        return;
+    }
+
+    if (action === 'cid') {
+        await ctx.answerCbQuery();
+        await ctx.reply(
+            `کانال مبدأ:\nشناسه: <code>${escapeHtml(String(session.channelId))}</code>\n` +
+                (session.channelMessageId != null
+                    ? `message_id: <code>${escapeHtml(String(session.channelMessageId))}</code>\n`
+                    : '') +
+                `\nدر .env می‌توانی استفاده کنی:\n` +
+                `<code>PUBLIC_POSTS_CHANNEL_ID=${escapeHtml(String(session.channelId))}</code>`,
+            htmlOpts()
+        );
+        return;
+    }
+
+    if (action === 'search') {
+        session.awaitQuery = true;
+        session.expiresAt = Date.now() + BIND_TTL_MS;
+        pendingSearchByAdmin.set(String(adminId), sessionId);
+        await ctx.answerCbQuery();
+        await ctx.reply(
+            `${e('search')} نام یا slug انیمه را همین‌جا بفرست (مثلاً <code>dandadan</code>).`,
+            htmlOpts()
+        );
+        return;
+    }
+
+    if (action === 'bind') {
+        await ctx.answerCbQuery('در حال جستجو...');
+        try {
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch {
+            /* ignore */
+        }
+        const ok = await startBindFromPayload(ctx, session);
+        if (ok) {
+            pendingForwardActions.delete(sessionId);
+            pendingSearchByAdmin.delete(String(adminId));
+        }
+        return;
+    }
+
+    await ctx.answerCbQuery('اکشن ناشناخته', { show_alert: true });
+}
+
+/**
+ * If admin typed an anime name after tapping «جستجو با نام».
+ * @param {import('telegraf').Context} ctx
+ * @returns {Promise<boolean>}
+ */
+async function handleAdminPendingSearchQuery(ctx) {
+    const adminId = getAdminUserId();
+    if (!adminId || String(ctx.from?.id) !== String(adminId)) return false;
+    if (ctx.chat?.type !== 'private') return false;
+
+    const raw = String(ctx.message?.text ?? '').trim();
+    if (!raw || raw.startsWith('/')) return false;
+
+    pruneExpiredBinds();
+    const sessionId = pendingSearchByAdmin.get(String(adminId));
+    if (!sessionId) return false;
+
+    const session = pendingForwardActions.get(sessionId);
+    if (!session || !session.awaitQuery) {
+        pendingSearchByAdmin.delete(String(adminId));
+        return false;
+    }
+
+    pendingSearchByAdmin.delete(String(adminId));
+    session.awaitQuery = false;
+    const ok = await startBindFromPayload(ctx, session, raw);
+    if (ok) pendingForwardActions.delete(sessionId);
+    return true;
+}
+
+/**
  * @param {BindSession} session
  * @param {string} animeIdOrSlug
  */
@@ -171,8 +534,7 @@ async function sendSearchResults(ctx, session, bindId) {
     if (!items.length) {
         await ctx.reply(
             `${e('warning')} نتیجه‌ای برای «${escapeHtml(session.query)}» پیدا نشد.\n` +
-                `دوباره با کوئری دقیق‌تر امتحان کن:\n` +
-                `<code>/bind_channel_post نام-یا-slug</code>`,
+                `دوباره با کوئری دقیق‌تر امتحان کن یا از دکمه «جستجو با نام» استفاده کن.`,
             htmlOpts()
         );
         return;
@@ -213,8 +575,8 @@ async function handleBindChannelPost(ctx) {
     if (!payload) {
         await ctx.reply(
             `${e('clipboard')} <b>راهنما</b>\n` +
-                `۱) آخرین پست کانال را به اینجا فوروارد کن\n` +
-                `۲) روی همان پیام ریپلای بزن:\n` +
+                `پست کانال را به اینجا فوروارد کن — منوی دکمه‌ای می‌آید.\n` +
+                `یا روی پیام فوروارد ریپلای بزن:\n` +
                 `<code>/bind_channel_post</code>\n` +
                 `یا با کوئری:\n` +
                 `<code>/bind_channel_post dandadan</code>`,
@@ -223,89 +585,7 @@ async function handleBindChannelPost(ctx) {
         return;
     }
 
-    const config = require('../../config');
-    const channelId =
-        payload.channelId ||
-        String(config.PUBLIC_POSTS_CHANNEL_ID || config.ADDITIONAL_CHANNEL_ID || '').trim() ||
-        null;
-
-    if (!channelId) {
-        await ctx.reply(
-            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن ` +
-                `یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
-            htmlOpts()
-        );
-        return;
-    }
-
-    const query =
-        rawArg ||
-        extractSearchQueryFromCaption(payload.captionText, payload.captionEntities);
-
-    if (!query) {
-        await ctx.reply(
-            `${e('warning')} عنوان از کپشن استخراج نشد. کوئری بده:\n` +
-                `<code>/bind_channel_post نام-انیمه</code>`,
-            htmlOpts()
-        );
-        return;
-    }
-
-    pruneExpiredBinds();
-    const bindId = createBindId();
-    /** @type {BindSession} */
-    const session = {
-        coverFileId: payload.coverFileId,
-        captionText: payload.captionText,
-        captionEntities: payload.captionEntities,
-        channelId,
-        channelMessageId: payload.channelMessageId,
-        query,
-        expiresAt: Date.now() + BIND_TTL_MS
-    };
-    pendingBinds.set(bindId, session);
-
-    // Backward-compatible: if arg looks like a known slug/id, try direct bind first.
-    if (rawArg && !/\s/.test(rawArg)) {
-        try {
-            const search = await shioriApi.get(
-                `/bot/anime/search?q=${encodeURIComponent(rawArg)}&limit=8`
-            );
-            const items = Array.isArray(search?.items) ? search.items : [];
-            const exact = items.find(
-                (it) =>
-                    String(it.slug || '').toLowerCase() === rawArg.toLowerCase() ||
-                    String(it.id || '').toLowerCase() === rawArg.toLowerCase()
-            );
-
-            if (exact && items.length === 1) {
-                const result = await putChannelTemplate(session, exact.id);
-                pendingBinds.delete(bindId);
-                await ctx.reply(
-                    `${e('success')} قالب کانال ذخیره شد.\n` +
-                        `<b>${escapeHtml(result?.title || exact.title || rawArg)}</b>\n` +
-                        `slug: <code>${escapeHtml(result?.slug || exact.slug || rawArg)}</code>\n` +
-                        `از این به بعد با افزودن قسمت در پنل، پیش‌نویس برایت می‌آید.`,
-                    htmlOpts()
-                );
-                return;
-            }
-        } catch (error) {
-            // Fall through to picker / error below
-            console.warn('bind direct lookup failed, showing picker:', error.message);
-        }
-    }
-
-    try {
-        await sendSearchResults(ctx, session, bindId);
-    } catch (error) {
-        pendingBinds.delete(bindId);
-        console.error('bind_channel_post search error:', error);
-        await ctx.reply(
-            `${e('error')} خطا در جستجو: ${escapeHtml(error.message)}`,
-            htmlOpts()
-        );
-    }
+    await startBindFromPayload(ctx, payload, rawArg);
 }
 
 /**
@@ -345,7 +625,7 @@ async function handleBindPickCallback(ctx, bindId, animeId) {
             `${e('success')} قالب کانال ذخیره شد.\n` +
                 `<b>${escapeHtml(result?.title || animeId)}</b>\n` +
                 `slug: <code>${escapeHtml(result?.slug || '')}</code>\n` +
-                `از این به بعد با افزودن قسمت در پنل، پیش‌نویس برایت می‌آید.`,
+                `بعد از افزودن قسمت، از پنل دکمه «پیش‌نویس کانال» را بزن.`,
             htmlOpts()
         );
     } catch (error) {
@@ -700,8 +980,12 @@ module.exports = {
     handleChannelDraftCallback,
     handleClearChannelDrafts,
     handleFlushChannelDrafts,
+    offerAdminForwardActions,
+    handleAdminForwardAction,
+    handleAdminPendingSearchQuery,
     deliverPendingChannelDraftPreviews,
     startChannelDraftPreviewPoller,
     extractChannelPostPayload,
-    extractSearchQueryFromCaption
+    extractSearchQueryFromCaption,
+    isChannelForwardMessage
 };
