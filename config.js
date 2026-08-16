@@ -33,6 +33,14 @@ module.exports = {
     ADDITIONAL_CHANNEL_USERNAME: process.env.ADDITIONAL_CHANNEL_USERNAME,
     PUBLIC_POSTS_CHANNEL_ID:
         process.env.PUBLIC_POSTS_CHANNEL_ID || process.env.ADDITIONAL_CHANNEL_ID,
+    /** Optional display label for PUBLIC_POSTS_CHANNEL_ID in draft picker */
+    PUBLIC_POSTS_CHANNEL_LABEL: process.env.PUBLIC_POSTS_CHANNEL_LABEL || null,
+    /**
+     * Extra / ordered publish targets for channel drafts.
+     * Format: id:Label,id2:Label2 (comma-separated).
+     * Merged with PUBLIC_POSTS / ADDITIONAL / PUBLIC channel ids.
+     */
+    POSTS_PUBLISH_CHANNELS: process.env.POSTS_PUBLISH_CHANNELS || '',
     /** When set, schedule posts publish here instead of PUBLIC_POSTS_CHANNEL_ID */
     SCHEDULE_TEST_CHANNEL_ID: process.env.SCHEDULE_TEST_CHANNEL_ID || null,
     ADMIN_USER_ID: process.env.ADMIN_USER_ID,

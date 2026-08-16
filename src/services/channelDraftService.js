@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const { sendPhotoWithHtmlCaption } = require('../utils/captionEntities');
-const { getAdminUserId, getAdminUserIds, isAdminUserId } = require('../utils/channelIds');
+const { getAdminUserId, getAdminUserIds, isAdminUserId, getPublishChannelChoices } = require('../utils/channelIds');
 
 /** @typedef {{
  *   coverFileId: string,
@@ -694,11 +694,64 @@ async function handleBindCancelCallback(ctx, bindId) {
 }
 
 /**
+ * Admin preview keyboard: one button per publish target + reject + mini-app.
+ * @param {string} draftId
+ * @param {string} animeId
+ */
+function buildDraftPreviewKeyboard(draftId, animeId) {
+    const channels = getPublishChannelChoices();
+    /** @type {Array<Array<{ text: string, callback_data?: string, url?: string }>>} */
+    const rows = [];
+
+    if (channels.length === 0) {
+        rows.push([
+            {
+                text: 'انتشار (کانال تنظیم نشده)',
+                callback_data: `chdraft_ok_${draftId}`
+            }
+        ]);
+    } else if (channels.length === 1) {
+        rows.push([
+            {
+                text: `ارسال به ${channels[0].label}`,
+                callback_data: `chdraft_ch_${draftId}_0`
+            }
+        ]);
+    } else {
+        for (let i = 0; i < channels.length; i++) {
+            const ch = channels[i];
+            rows.push([
+                {
+                    text: `ارسال به ${ch.label}`,
+                    callback_data: `chdraft_ch_${draftId}_${i}`
+                }
+            ]);
+        }
+    }
+
+    rows.push([{ text: 'رد', callback_data: `chdraft_no_${draftId}` }]);
+
+    const { buildAnimeEpisodesMiniAppUrl } = require('../utils/miniAppLinks');
+    const miniUrl = buildAnimeEpisodesMiniAppUrl(animeId);
+    if (miniUrl) {
+        rows.push([
+            {
+                text: 'دانلود از مینی‌اپ',
+                url: miniUrl
+            }
+        ]);
+    }
+
+    return { inline_keyboard: rows };
+}
+
+/**
  * @param {import('telegraf').Context} ctx
  * @param {string} draftId
  * @param {'publish' | 'reject'} action
+ * @param {string} [channelIdOverride]
  */
-async function handleChannelDraftCallback(ctx, draftId, action) {
+async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverride) {
     if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
@@ -719,8 +772,33 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
             return;
         }
 
+        const channels = getPublishChannelChoices();
+        let channelId = String(channelIdOverride ?? '').trim();
+
+        if (!channelId) {
+            if (channels.length === 1) {
+                channelId = channels[0].id;
+            } else if (channels.length > 1) {
+                // Legacy "انتشار" button — ask admin to pick.
+                await ctx.editMessageReplyMarkup({
+                    inline_keyboard: channels.map((ch, i) => [
+                        {
+                            text: `ارسال به ${ch.label}`,
+                            callback_data: `chdraft_ch_${draftId}_${i}`
+                        }
+                    ]).concat([[{ text: 'رد', callback_data: `chdraft_no_${draftId}` }]])
+                });
+                await ctx.reply(
+                    `${e('info')} کانال مقصد را از دکمه‌های زیر پیش‌نمایش انتخاب کن.`,
+                    htmlOpts()
+                );
+                return;
+            }
+        }
+
         const prepared = await shioriApi.post(
-            `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`
+            `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`,
+            channelId ? { channel_id: channelId } : {}
         );
 
         if (prepared?.already_published) {
@@ -732,16 +810,16 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
             throw new Error('publish payload missing needs_bot_send');
         }
 
-        const channelId = prepared.channel_id;
+        const targetChannelId = String(prepared.channel_id || channelId || '').trim();
         const cover = prepared.cover_file_id;
         const caption = prepared.caption;
-        if (!channelId || !cover || !caption) {
+        if (!targetChannelId || !cover || !caption) {
             throw new Error('publish payload incomplete');
         }
 
         const sent = await sendPhotoWithHtmlCaption(
             ctx.telegram,
-            channelId,
+            targetChannelId,
             cover,
             caption,
             { reply_markup: prepared.reply_markup || undefined }
@@ -756,12 +834,15 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
             `/bot/channel-drafts/${encodeURIComponent(draftId)}/mark-published`,
             {
                 published_message_id: messageId,
-                channel_id: channelId
+                channel_id: targetChannelId
             }
         );
 
+        const label =
+            channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
+
         await ctx.reply(
-            `${e('success')} منتشر شد.\n` +
+            `${e('success')} منتشر شد در <b>${escapeHtml(label)}</b>.\n` +
                 `message_id: <code>${escapeHtml(String(messageId))}</code>`,
             htmlOpts()
         );
@@ -772,6 +853,21 @@ async function handleChannelDraftCallback(ctx, draftId, action) {
             htmlOpts()
         );
     }
+}
+
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {string} draftId
+ * @param {number} channelIndex
+ */
+async function handleChannelDraftPublishTo(ctx, draftId, channelIndex) {
+    const channels = getPublishChannelChoices();
+    const ch = channels[channelIndex];
+    if (!ch) {
+        await ctx.answerCbQuery('کانال نامعتبر.', { show_alert: true });
+        return;
+    }
+    await handleChannelDraftCallback(ctx, draftId, 'publish', ch.id);
 }
 
 /**
@@ -848,8 +944,13 @@ async function deliverPendingChannelDraftPreviews(bot) {
                         chatId,
                         `پیش‌نویس پست کانال\n` +
                             `<b>${escapeHtml(String(item.anime_title || ''))}</b> — قسمت ${escapeHtml(String(item.episode_number ?? ''))}\n` +
-                            `تأیید → انتشار در کانال`,
+                            `کانال مقصد را از دکمه‌های زیر عکس انتخاب کن.`,
                         htmlOpts()
+                    );
+
+                    const previewKeyboard = buildDraftPreviewKeyboard(
+                        draftId,
+                        String(item.anime_id || '')
                     );
 
                     const preview = await sendPhotoWithHtmlCaption(
@@ -857,7 +958,7 @@ async function deliverPendingChannelDraftPreviews(bot) {
                         chatId,
                         cover,
                         caption,
-                        { reply_markup: item.draft_keyboard || undefined }
+                        { reply_markup: previewKeyboard }
                     );
 
                     const messageId = preview?.message_id;
@@ -993,6 +1094,7 @@ module.exports = {
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
+    handleChannelDraftPublishTo,
     handleClearChannelDrafts,
     handleFlushChannelDrafts,
     offerAdminForwardActions,

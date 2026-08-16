@@ -24,6 +24,56 @@ function getPublicPostsChannelId() {
     );
 }
 
+/**
+ * Channels an admin can pick when approving a channel-draft post.
+ * Env:
+ * - POSTS_PUBLISH_CHANNELS=id:Label,id2:Label2  (preferred multi-list)
+ * - plus PUBLIC_POSTS_CHANNEL_ID / ADDITIONAL_CHANNEL_ID / PUBLIC_CHANNEL_ID
+ * @returns {Array<{ id: string, label: string }>}
+ */
+function getPublishChannelChoices() {
+    /** @type {Array<{ id: string, label: string }>} */
+    const choices = [];
+    const add = (id, label) => {
+        const cid = normalizeChatId(id);
+        if (!cid) return;
+        if (choices.some((c) => c.id === cid)) return;
+        const pretty = String(label ?? '').trim() || cid;
+        choices.push({ id: cid, label: pretty });
+    };
+
+    const rawList = String(config.POSTS_PUBLISH_CHANNELS ?? '').trim();
+    if (rawList) {
+        for (const part of rawList.split(',')) {
+            const piece = part.trim();
+            if (!piece) continue;
+            const colon = piece.indexOf(':');
+            if (colon === -1) {
+                add(piece, piece);
+            } else {
+                add(piece.slice(0, colon), piece.slice(colon + 1));
+            }
+        }
+    }
+
+    add(
+        config.PUBLIC_POSTS_CHANNEL_ID || config.ADDITIONAL_CHANNEL_ID,
+        config.PUBLIC_POSTS_CHANNEL_LABEL ||
+            config.ADDITIONAL_CHANNEL_USERNAME ||
+            'کانال پست‌ها'
+    );
+    add(
+        config.ADDITIONAL_CHANNEL_ID,
+        config.ADDITIONAL_CHANNEL_USERNAME || 'کانال اضافی'
+    );
+    add(
+        config.PUBLIC_CHANNEL_ID,
+        config.PUBLIC_CHANNEL_USERNAME || 'کانال عمومی'
+    );
+
+    return choices;
+}
+
 /** Schedule publish target — test channel overrides production when set. */
 function getSchedulePublishChannelId() {
     const testId = normalizeChatId(config.SCHEDULE_TEST_CHANNEL_ID);
@@ -101,6 +151,7 @@ module.exports = {
     getPrivateChannelId,
     getArchiveChannelId,
     getPublicPostsChannelId,
+    getPublishChannelChoices,
     getSchedulePublishChannelId,
     isScheduleTestMode,
     getAdminUserId,
