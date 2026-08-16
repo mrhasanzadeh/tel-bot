@@ -26,5 +26,7 @@ module.exports = {
     speech: '5460795800101594035',
     flag: '5190604119089358564',
     chat: '5215334566549540768',
-    clipboard: '5334544901428229844'
+    clipboard: '5334544901428229844',
+    // S##: Episode [range] pack line on TheShioriSub
+    seasonEpisode: '5350572310627632617',
 };

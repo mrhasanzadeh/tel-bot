@@ -81,7 +81,7 @@ function buildScheduleCaption(opts) {
         }
         if (packEpisodesSlug) {
             lines.push(
-                `${e('download')} S${String(season).padStart(2, '0')}: Episode [${rangeStart}-${rangeEnd}] ` +
+                `${e('seasonEpisode')} S${String(season).padStart(2, '0')}: Episode [${rangeStart}-${rangeEnd}] ` +
                     `${tgLink(packLink(botUsername, packEpisodesSlug), 'Pack')} ${e('cool')}`
             );
         }

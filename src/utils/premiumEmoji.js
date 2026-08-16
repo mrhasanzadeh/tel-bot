@@ -32,7 +32,8 @@ const FALLBACK = {
     speech: '🗣️',
     flag: '🚩',
     chat: '💬',
-    clipboard: '📋'
+    clipboard: '📋',
+    seasonEpisode: '✅',
 };
 
 const DEFAULT_IDS = require('../config/premiumEmojiDefaults');
