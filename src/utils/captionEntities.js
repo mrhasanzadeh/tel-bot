@@ -90,7 +90,9 @@ function parseHtmlChunk(html) {
     const src = String(html ?? '');
 
     while (pos < src.length) {
-        let m = src.slice(pos).match(/^<tg-emoji emoji-id="(\d+)">([\s\S]*?)<\/tg-emoji>/);
+        let m = src.slice(pos).match(
+            /^<tg-emoji\b[^>]*\bemoji-id=["'](\d+)["'][^>]*>([\s\S]*?)<\/tg-emoji>/i
+        );
         if (m) {
             const fallback = decodeHtmlEntities(m[2]);
             // Telegram custom_emoji must wrap plain text, not nested tags
@@ -221,7 +223,7 @@ function channelCaptionOpts(htmlCaption, opts = {}) {
 }
 
 /**
- * Send photo with caption, trying entities → entities without custom_emoji → HTML → plain.
+ * Send photo with caption, trying entities → HTML → entities without custom_emoji → plain.
  * Never leaves a caption-less photo as the only result when caption exists.
  *
  * @param {import('telegraf').Telegram} telegram
@@ -282,11 +284,85 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
     });
 }
 
+/**
+ * Largest photo file_id from a Telegram message, if any.
+ * @param {import('telegraf/types').Message} [message]
+ * @returns {string|null}
+ */
+function photoFileIdFromMessage(message) {
+    const photos = message?.photo;
+    if (!Array.isArray(photos) || !photos.length) return null;
+    return photos[photos.length - 1]?.file_id || null;
+}
+
+/**
+ * Publish a channel photo while preserving premium emoji.
+ * Prefer the admin preview's caption_entities (already accepted by Telegram),
+ * then HTML parse — avoid private→channel copyMessage (often drops custom_emoji).
+ *
+ * @param {import('telegraf').Telegram} telegram
+ * @param {object} opts
+ * @param {string|number} opts.chatId
+ * @param {string} opts.coverFileId
+ * @param {string} opts.htmlCaption
+ * @param {object} [opts.replyMarkup]
+ * @param {import('telegraf/types').Message} [opts.previewMessage]
+ */
+async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
+    const {
+        chatId,
+        coverFileId,
+        htmlCaption,
+        replyMarkup,
+        previewMessage
+    } = opts;
+    const base = {
+        disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+    };
+
+    const previewCaption = String(previewMessage?.caption ?? '');
+    const previewEntities = previewMessage?.caption_entities;
+    const previewPhoto = photoFileIdFromMessage(previewMessage) || coverFileId;
+
+    if (previewCaption && Array.isArray(previewEntities) && previewEntities.length) {
+        try {
+            const truncated = truncateCaption(
+                previewCaption,
+                previewEntities,
+                PHOTO_CAPTION_MAX
+            );
+            const sent = await telegram.sendPhoto(chatId, previewPhoto, {
+                caption: truncated.caption,
+                caption_entities: truncated.caption_entities,
+                ...base
+            });
+            console.log('channel publish: used preview caption_entities');
+            return sent;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(
+                `channel publish preview entities failed: ${msg}; trying HTML parse`
+            );
+        }
+    }
+
+    return sendPhotoWithHtmlCaption(
+        telegram,
+        chatId,
+        coverFileId,
+        htmlCaption,
+        { reply_markup: replyMarkup }
+    );
+}
+
 module.exports = {
     utf16Length,
     htmlToCaptionPayload,
     channelCaptionOpts,
     sanitizeEntities,
     sendPhotoWithHtmlCaption,
+    sendPhotoPreservingPremiumEmoji,
+    photoFileIdFromMessage,
     PHOTO_CAPTION_MAX
 };

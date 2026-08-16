@@ -1,7 +1,10 @@
 const crypto = require('crypto');
 const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
-const { sendPhotoWithHtmlCaption } = require('../utils/captionEntities');
+const {
+    sendPhotoWithHtmlCaption,
+    sendPhotoPreservingPremiumEmoji
+} = require('../utils/captionEntities');
 const { getAdminUserId, getAdminUserIds, isAdminUserId, getPublishChannelChoices } = require('../utils/channelIds');
 
 /** @typedef {{
@@ -817,48 +820,17 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             throw new Error('publish payload incomplete');
         }
 
-        // Prefer copying the admin preview message so premium custom_emoji entities
-        // stay intact (re-send via HTML/entities often falls back and drops them).
-        const previewChatId =
-            ctx.callbackQuery?.message?.chat?.id ??
-            prepared.draft?.admin_preview_chat_id ??
-            null;
-        const previewMessageId =
-            ctx.callbackQuery?.message?.message_id ??
-            prepared.draft?.admin_preview_message_id ??
-            null;
-
-        let messageId = null;
-        if (previewChatId != null && previewMessageId != null) {
-            try {
-                const copied = await ctx.telegram.copyMessage(
-                    targetChannelId,
-                    previewChatId,
-                    Number(previewMessageId),
-                    {
-                        reply_markup:
-                            prepared.reply_markup || { inline_keyboard: [] }
-                    }
-                );
-                messageId = copied?.message_id ?? null;
-            } catch (copyErr) {
-                const msg = copyErr instanceof Error ? copyErr.message : String(copyErr);
-                console.warn(
-                    `channel draft copyMessage failed draft=${draftId}: ${msg}; falling back to sendPhoto`
-                );
-            }
-        }
-
-        if (!messageId) {
-            const sent = await sendPhotoWithHtmlCaption(
-                ctx.telegram,
-                targetChannelId,
-                cover,
-                caption,
-                { reply_markup: prepared.reply_markup || undefined }
-            );
-            messageId = sent?.message_id ?? null;
-        }
+        // Re-send with the preview's caption_entities (private→channel copyMessage
+        // often strips custom_emoji even when the admin preview looked correct).
+        const previewMessage = ctx.callbackQuery?.message || null;
+        const sent = await sendPhotoPreservingPremiumEmoji(ctx.telegram, {
+            chatId: targetChannelId,
+            coverFileId: cover,
+            htmlCaption: caption,
+            replyMarkup: prepared.reply_markup || undefined,
+            previewMessage
+        });
+        const messageId = sent?.message_id ?? null;
 
         if (!messageId) {
             throw new Error('publish returned no message_id');
