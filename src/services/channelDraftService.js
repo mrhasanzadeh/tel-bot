@@ -3,7 +3,9 @@ const shioriApi = require('./shioriApiClient');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const {
     sendPhotoWithHtmlCaption,
-    sendPhotoPreservingPremiumEmoji
+    sendPhotoPreservingPremiumEmoji,
+    snapshotFromMessage,
+    countCustomEmoji
 } = require('../utils/captionEntities');
 const { getAdminUserId, getAdminUserIds, isAdminUserId, getPublishChannelChoices } = require('../utils/channelIds');
 
@@ -20,6 +22,37 @@ const { getAdminUserId, getAdminUserIds, isAdminUserId, getPublishChannelChoices
 const BIND_TTL_MS = 10 * 60 * 1000;
 /** @type {Map<string, BindSession>} */
 const pendingBinds = new Map();
+
+/**
+ * Caption Telegram accepted on admin preview — reused on channel publish so
+ * custom_emoji entities are not re-parsed / stripped.
+ * @type {Map<string, { photoFileId: string|null, caption: string, caption_entities: object[], customEmojiCount: number, savedAt: number }>}
+ */
+const draftPreviewSnapshots = new Map();
+const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+
+function rememberDraftPreviewSnapshot(draftId, message, fallbackPhotoFileId) {
+    const id = String(draftId || '').trim();
+    if (!id || !message) return;
+    const snap = snapshotFromMessage(message, fallbackPhotoFileId);
+    if (!snap) return;
+    draftPreviewSnapshots.set(id, { ...snap, savedAt: Date.now() });
+    console.log(
+        `📋 draft preview snapshot draft=${id} custom_emoji=${snap.customEmojiCount}`
+    );
+}
+
+function takeDraftPreviewSnapshot(draftId) {
+    const id = String(draftId || '').trim();
+    if (!id) return null;
+    const snap = draftPreviewSnapshots.get(id) || null;
+    if (!snap) return null;
+    if (Date.now() - (snap.savedAt || 0) > SNAPSHOT_TTL_MS) {
+        draftPreviewSnapshots.delete(id);
+        return null;
+    }
+    return snap;
+}
 
 /** @typedef {{
  *   coverFileId: string,
@@ -820,17 +853,32 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             throw new Error('publish payload incomplete');
         }
 
-        // Re-send with the preview's caption_entities (private→channel copyMessage
-        // often strips custom_emoji even when the admin preview looked correct).
-        const previewMessage = ctx.callbackQuery?.message || null;
+        // Reuse caption_entities Telegram already accepted on the admin preview.
+        // Never fall back to stripping custom_emoji (that was dropping premium emoji).
+        const snapshot =
+            takeDraftPreviewSnapshot(draftId) ||
+            snapshotFromMessage(ctx.callbackQuery?.message, cover);
         const sent = await sendPhotoPreservingPremiumEmoji(ctx.telegram, {
             chatId: targetChannelId,
             coverFileId: cover,
             htmlCaption: caption,
             replyMarkup: prepared.reply_markup || undefined,
-            previewMessage
+            previewMessage: ctx.callbackQuery?.message || null,
+            snapshot
         });
         const messageId = sent?.message_id ?? null;
+        const publishedCustom = countCustomEmoji(sent?.caption_entities);
+        console.log(
+            `📋 channel draft published draft=${draftId} msg=${messageId} ` +
+                `custom_emoji=${publishedCustom}`
+        );
+        if (snapshot?.customEmojiCount > 0 && publishedCustom < snapshot.customEmojiCount) {
+            console.warn(
+                `📋 channel draft premium emoji still short draft=${draftId} ` +
+                    `got=${publishedCustom} expected=${snapshot.customEmojiCount}`
+            );
+        }
+        draftPreviewSnapshots.delete(String(draftId));
 
         if (!messageId) {
             throw new Error('publish returned no message_id');
@@ -970,9 +1018,11 @@ async function deliverPendingChannelDraftPreviews(bot) {
                     const messageId = preview?.message_id;
                     if (messageId && !ack) {
                         ack = { chatId, messageId };
+                        rememberDraftPreviewSnapshot(draftId, preview, cover);
                     }
                     console.log(
-                        `📋 Channel draft preview delivered draft=${draftId} → ${chatId}`
+                        `📋 Channel draft preview delivered draft=${draftId} → ${chatId} ` +
+                            `custom_emoji=${countCustomEmoji(preview?.caption_entities)}`
                     );
                 } catch (sendErr) {
                     const msg = sendErr instanceof Error ? sendErr.message : String(sendErr);

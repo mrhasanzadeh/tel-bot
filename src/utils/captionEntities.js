@@ -51,6 +51,14 @@ function sanitizeEntities(text, entities) {
 }
 
 /**
+ * @param {object[]|undefined|null} entities
+ * @returns {number}
+ */
+function countCustomEmoji(entities) {
+    return (entities || []).filter((e) => e && e.type === 'custom_emoji').length;
+}
+
+/**
  * @param {string} text
  * @param {object[]} entities
  * @param {number} maxLen
@@ -223,23 +231,85 @@ function channelCaptionOpts(htmlCaption, opts = {}) {
 }
 
 /**
- * Send photo with caption, trying entities → HTML → entities without custom_emoji → plain.
- * Never leaves a caption-less photo as the only result when caption exists.
- *
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string|number} chatId
+ * @param {number} messageId
+ * @param {object} [replyMarkup]
+ */
+async function applyReplyMarkup(telegram, chatId, messageId, replyMarkup) {
+    if (!replyMarkup || !messageId) return;
+    try {
+        await telegram.editMessageReplyMarkup(
+            chatId,
+            messageId,
+            undefined,
+            replyMarkup
+        );
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`editMessageReplyMarkup failed: ${msg}`);
+    }
+}
+
+/**
+ * If Telegram accepted the photo but dropped custom_emoji, re-apply via editMessageCaption.
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string|number} chatId
+ * @param {import('telegraf/types').Message.PhotoMessage} sent
+ * @param {string} caption
+ * @param {object[]} entities
+ * @param {object} [replyMarkup]
+ * @param {number} expectedCustom
+ */
+async function repairCaptionIfPremiumLost(
+    telegram,
+    chatId,
+    sent,
+    caption,
+    entities,
+    replyMarkup,
+    expectedCustom
+) {
+    const got = countCustomEmoji(sent?.caption_entities);
+    if (expectedCustom > 0 && got < expectedCustom) {
+        console.warn(
+            `premium emoji lost after send (${got}/${expectedCustom}); repairing via editMessageCaption`
+        );
+        const repaired = await telegram.editMessageCaption(
+            chatId,
+            sent.message_id,
+            undefined,
+            caption,
+            {
+                caption_entities: entities,
+                ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+            }
+        );
+        return repaired && typeof repaired === 'object' ? repaired : sent;
+    }
+    await applyReplyMarkup(telegram, chatId, sent.message_id, replyMarkup);
+    return sent;
+}
+
+/**
+ * Send photo with caption.
  * @param {import('telegraf').Telegram} telegram
  * @param {string|number} chatId
  * @param {string} photo
  * @param {string} htmlCaption
- * @param {object} [extra] reply_markup etc.
+ * @param {object} [extra] reply_markup, allowStripPremium (default true for non-channel callers)
  */
 async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, extra = {}) {
+    const allowStripPremium = extra.allowStripPremium !== false;
     const entityOpts = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
-    const { reply_markup, ...rest } = extra;
+    const { reply_markup, allowStripPremium: _a, ...rest } = extra;
     const base = {
-        disable_web_page_preview: true,
         ...(reply_markup ? { reply_markup } : {}),
         ...rest
     };
+    // Strip unknown/non-photo flags that some Telegram builds reject with entities.
+    delete base.disable_web_page_preview;
+    delete base.allowStripPremium;
 
     try {
         return await telegram.sendPhoto(chatId, photo, {
@@ -252,7 +322,6 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
         console.warn(`sendPhoto entities failed: ${msg}; trying HTML tg-emoji`);
     }
 
-    // Keep premium emoji via HTML tags before stripping custom_emoji entities.
     try {
         return await telegram.sendPhoto(chatId, photo, {
             caption: String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX),
@@ -261,7 +330,15 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendPhoto HTML(tg-emoji) failed: ${msg}; retry without custom_emoji`);
+        console.warn(
+            `sendPhoto HTML(tg-emoji) failed: ${msg}` +
+                (allowStripPremium ? '; retry without custom_emoji' : '')
+        );
+        if (!allowStripPremium) throw err instanceof Error ? err : new Error(msg);
+    }
+
+    if (!allowStripPremium) {
+        throw new Error('sendPhoto failed while preserving premium emoji');
     }
 
     try {
@@ -296,9 +373,28 @@ function photoFileIdFromMessage(message) {
 }
 
 /**
- * Publish a channel photo while preserving premium emoji.
- * Prefer the admin preview's caption_entities (already accepted by Telegram),
- * then HTML parse — avoid private→channel copyMessage (often drops custom_emoji).
+ * Build a reusable caption snapshot from a Message Telegram already accepted.
+ * @param {import('telegraf/types').Message} [message]
+ * @param {string} [fallbackPhotoFileId]
+ */
+function snapshotFromMessage(message, fallbackPhotoFileId) {
+    if (!message || !message.caption) return null;
+    const truncated = truncateCaption(
+        message.caption,
+        message.caption_entities || [],
+        PHOTO_CAPTION_MAX
+    );
+    return {
+        photoFileId: photoFileIdFromMessage(message) || fallbackPhotoFileId || null,
+        caption: truncated.caption,
+        caption_entities: truncated.caption_entities,
+        customEmojiCount: countCustomEmoji(truncated.caption_entities)
+    };
+}
+
+/**
+ * Publish channel photo without dropping premium emoji.
+ * Never uses the “strip custom_emoji” fallback. Keyboard is applied after caption.
  *
  * @param {import('telegraf').Telegram} telegram
  * @param {object} opts
@@ -307,52 +403,107 @@ function photoFileIdFromMessage(message) {
  * @param {string} opts.htmlCaption
  * @param {object} [opts.replyMarkup]
  * @param {import('telegraf/types').Message} [opts.previewMessage]
+ * @param {{ photoFileId?: string|null, caption: string, caption_entities: object[], customEmojiCount?: number }|null} [opts.snapshot]
  */
 async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
-    const {
-        chatId,
-        coverFileId,
-        htmlCaption,
-        replyMarkup,
-        previewMessage
-    } = opts;
-    const base = {
-        disable_web_page_preview: true,
-        ...(replyMarkup ? { reply_markup: replyMarkup } : {})
-    };
+    const { chatId, coverFileId, htmlCaption, replyMarkup, previewMessage, snapshot } =
+        opts;
 
-    const previewCaption = String(previewMessage?.caption ?? '');
-    const previewEntities = previewMessage?.caption_entities;
-    const previewPhoto = photoFileIdFromMessage(previewMessage) || coverFileId;
+    const fromPreview = snapshotFromMessage(previewMessage, coverFileId);
+    const fromHtml = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
+    const preferred =
+        snapshot && snapshot.caption
+            ? {
+                  photoFileId: snapshot.photoFileId || coverFileId,
+                  caption: snapshot.caption,
+                  caption_entities: snapshot.caption_entities || [],
+                  customEmojiCount:
+                      snapshot.customEmojiCount ??
+                      countCustomEmoji(snapshot.caption_entities)
+              }
+            : fromPreview && fromPreview.customEmojiCount > 0
+              ? fromPreview
+              : {
+                    photoFileId: coverFileId,
+                    caption: fromHtml.caption,
+                    caption_entities: fromHtml.caption_entities,
+                    customEmojiCount: countCustomEmoji(fromHtml.caption_entities)
+                };
 
-    if (previewCaption && Array.isArray(previewEntities) && previewEntities.length) {
+    const photo = preferred.photoFileId || coverFileId;
+    const expected = preferred.customEmojiCount;
+    console.log(
+        `channel publish: custom_emoji expected=${expected} ` +
+            `entities=${preferred.caption_entities.length} source=${
+                snapshot ? 'snapshot' : fromPreview?.customEmojiCount ? 'callback' : 'html'
+            }`
+    );
+
+    /** @type {import('telegraf/types').Message.PhotoMessage | null} */
+    let sent = null;
+    let lastErr = null;
+
+    // 1) caption_entities without keyboard (markup can break some entity sends)
+    try {
+        sent = await telegram.sendPhoto(chatId, photo, {
+            caption: preferred.caption,
+            caption_entities: preferred.caption_entities
+        });
+        console.log('channel publish: sendPhoto+entities ok');
+    } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish entities failed: ${msg}`);
+    }
+
+    // 2) HTML parse_mode (Telegram builds custom_emoji itself)
+    if (!sent) {
         try {
-            const truncated = truncateCaption(
-                previewCaption,
-                previewEntities,
-                PHOTO_CAPTION_MAX
-            );
-            const sent = await telegram.sendPhoto(chatId, previewPhoto, {
-                caption: truncated.caption,
-                caption_entities: truncated.caption_entities,
-                ...base
+            sent = await telegram.sendPhoto(chatId, photo, {
+                caption: String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX),
+                parse_mode: 'HTML'
             });
-            console.log('channel publish: used preview caption_entities');
-            return sent;
+            console.log('channel publish: sendPhoto+HTML ok');
         } catch (err) {
+            lastErr = err;
             const msg = err instanceof Error ? err.message : String(err);
-            console.warn(
-                `channel publish preview entities failed: ${msg}; trying HTML parse`
-            );
+            console.warn(`channel publish HTML failed: ${msg}`);
         }
     }
 
-    return sendPhotoWithHtmlCaption(
+    // 3) photo first, then editMessageCaption (same pattern as schedule fallback)
+    if (!sent) {
+        try {
+            sent = await telegram.sendPhoto(chatId, photo);
+            await telegram.editMessageCaption(
+                chatId,
+                sent.message_id,
+                undefined,
+                preferred.caption,
+                { caption_entities: preferred.caption_entities }
+            );
+            console.log('channel publish: sendPhoto+editCaption ok');
+        } catch (err) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(`channel publish editCaption failed: ${msg}`);
+            sent = null;
+        }
+    }
+
+    if (!sent) {
+        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'unknown');
+        throw new Error(`channel publish failed while preserving premium emoji: ${msg}`);
+    }
+
+    return repairCaptionIfPremiumLost(
         telegram,
         chatId,
-        coverFileId,
-        htmlCaption,
-        { reply_markup: replyMarkup }
+        sent,
+        preferred.caption,
+        preferred.caption_entities,
+        replyMarkup,
+        expected
     );
 }
 
@@ -361,8 +512,10 @@ module.exports = {
     htmlToCaptionPayload,
     channelCaptionOpts,
     sanitizeEntities,
+    countCustomEmoji,
     sendPhotoWithHtmlCaption,
     sendPhotoPreservingPremiumEmoji,
     photoFileIdFromMessage,
+    snapshotFromMessage,
     PHOTO_CAPTION_MAX
 };
