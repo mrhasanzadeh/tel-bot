@@ -28,13 +28,11 @@ const {
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
-    handleChannelDraftPublishTo,
     handleClearChannelDrafts,
     handleFlushChannelDrafts,
     offerAdminForwardActions,
     handleAdminForwardAction,
-    handleAdminPendingSearchQuery,
-    maybeAttachMiniAppOnChannelPost
+    handleAdminPendingSearchQuery
 } = require('../services/channelDraftService');
 
 // Store pending links for non-member users
@@ -202,11 +200,6 @@ function setupHandlers(bot) {
             if (error.response) {
                 console.error('Telegram API:', error.response.description || error.response);
             }
-        }
-        try {
-            await maybeAttachMiniAppOnChannelPost(ctx);
-        } catch (error) {
-            console.warn('mini-app auto-attach error:', error.message);
         }
         return next();
     });
@@ -385,18 +378,8 @@ function setupHandlers(bot) {
         }
     });
 
-    bot.action(/^chdraft_ok_([0-9a-f-]{36})$/i, async (ctx) => {
-        await handleChannelDraftCallback(ctx, ctx.match[1], 'publish');
-    });
-    bot.action(/^chdraft_ch_([0-9a-f-]{36})_(\d+)$/i, async (ctx) => {
-        await handleChannelDraftPublishTo(
-            ctx,
-            ctx.match[1],
-            Number.parseInt(ctx.match[2], 10)
-        );
-    });
     bot.action(/^chdraft_no_([0-9a-f-]{36})$/i, async (ctx) => {
-        await handleChannelDraftCallback(ctx, ctx.match[1], 'reject');
+        await handleChannelDraftCallback(ctx, ctx.match[1]);
     });
 
     bot.command('mirroring', async (ctx) => {
