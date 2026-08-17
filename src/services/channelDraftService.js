@@ -6,10 +6,8 @@ const {
     countCustomEmoji
 } = require('../utils/captionEntities');
 const {
-    getAdminUserId,
     getAdminUserIds,
-    isAdminUserId,
-    normalizeChatId
+    isAdminUserId
 } = require('../utils/channelIds');
 
 /** @typedef {{
