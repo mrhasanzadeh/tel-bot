@@ -853,8 +853,8 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             throw new Error('publish payload incomplete');
         }
 
-        // Reuse caption_entities Telegram already accepted on the admin preview.
-        // Never fall back to stripping custom_emoji (that was dropping premium emoji).
+        // Copy the bound channel template (premium emoji already live there).
+        // sendPhoto to a channel from file_id silently turns custom_emoji into unicode.
         const snapshot =
             takeDraftPreviewSnapshot(draftId) ||
             snapshotFromMessage(ctx.callbackQuery?.message, cover);
@@ -864,7 +864,9 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             htmlCaption: caption,
             replyMarkup: prepared.reply_markup || undefined,
             previewMessage: ctx.callbackQuery?.message || null,
-            snapshot
+            snapshot,
+            sourceChatId: prepared.source_chat_id || null,
+            sourceMessageId: prepared.source_message_id || null
         });
         const messageId = sent?.message_id ?? null;
         const publishedCustom = countCustomEmoji(sent?.caption_entities);

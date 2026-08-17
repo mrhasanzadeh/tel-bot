@@ -393,8 +393,99 @@ function snapshotFromMessage(message, fallbackPhotoFileId) {
 }
 
 /**
+ * Copy an existing CHANNEL post (already has premium emoji) into the target,
+ * then replace caption. sendPhoto from file_id to a channel drops custom_emoji.
+ *
+ * @param {import('telegraf').Telegram} telegram
+ * @param {object} opts
+ * @param {string|number} opts.targetChatId
+ * @param {string|number} opts.sourceChatId
+ * @param {string|number} opts.sourceMessageId
+ * @param {string} opts.htmlCaption
+ * @param {object} [opts.replyMarkup]
+ * @returns {Promise<object|null>}
+ */
+async function copyChannelPostThenSetCaption(telegram, opts) {
+    const { targetChatId, sourceChatId, sourceMessageId, htmlCaption, replyMarkup } =
+        opts;
+    if (targetChatId == null || sourceChatId == null || sourceMessageId == null) {
+        return null;
+    }
+    const payload = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
+    const extra = {
+        caption: payload.caption,
+        caption_entities: payload.caption_entities,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+    };
+
+    try {
+        const copied = await telegram.copyMessage(
+            targetChatId,
+            sourceChatId,
+            Number(sourceMessageId),
+            extra
+        );
+        const messageId = typeof copied === 'number' ? copied : copied?.message_id;
+        if (!messageId) return null;
+        const msg =
+            copied && typeof copied === 'object'
+                ? copied
+                : { message_id: messageId, caption_entities: payload.caption_entities };
+        console.log(
+            `channel publish: copy+caption from ${sourceChatId}/${sourceMessageId} ` +
+                `custom_emoji=${countCustomEmoji(msg.caption_entities)}`
+        );
+        return msg;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish copy+caption failed: ${msg}; copy then edit`);
+    }
+
+    let copiedId = null;
+    try {
+        const copied = await telegram.copyMessage(
+            targetChatId,
+            sourceChatId,
+            Number(sourceMessageId)
+        );
+        copiedId = typeof copied === 'number' ? copied : copied?.message_id ?? null;
+        if (!copiedId) return null;
+        const edited = await telegram.editMessageCaption(
+            targetChatId,
+            copiedId,
+            undefined,
+            payload.caption,
+            {
+                caption_entities: payload.caption_entities,
+                ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+            }
+        );
+        const msg =
+            edited && typeof edited === 'object'
+                ? edited
+                : { message_id: copiedId, caption_entities: payload.caption_entities };
+        console.log(
+            `channel publish: copy+edit from ${sourceChatId}/${sourceMessageId} ` +
+                `custom_emoji=${countCustomEmoji(msg.caption_entities)}`
+        );
+        return msg;
+    } catch (err) {
+        const fail = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish copy+edit failed: ${fail}`);
+        if (copiedId) {
+            try {
+                await telegram.deleteMessage(targetChatId, copiedId);
+            } catch {
+                /* ignore */
+            }
+        }
+        return null;
+    }
+}
+
+/**
  * Publish channel photo without dropping premium emoji.
- * Never uses the “strip custom_emoji” fallback. Keyboard is applied after caption.
+ * Prefer copying a bound channel template; sendPhoto to channels drops custom_emoji.
  *
  * @param {import('telegraf').Telegram} telegram
  * @param {object} opts
@@ -402,12 +493,34 @@ function snapshotFromMessage(message, fallbackPhotoFileId) {
  * @param {string} opts.coverFileId
  * @param {string} opts.htmlCaption
  * @param {object} [opts.replyMarkup]
+ * @param {string|number} [opts.sourceChatId]
+ * @param {string|number} [opts.sourceMessageId]
  * @param {import('telegraf/types').Message} [opts.previewMessage]
  * @param {{ photoFileId?: string|null, caption: string, caption_entities: object[], customEmojiCount?: number }|null} [opts.snapshot]
  */
 async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
-    const { chatId, coverFileId, htmlCaption, replyMarkup, previewMessage, snapshot } =
-        opts;
+    const {
+        chatId,
+        coverFileId,
+        htmlCaption,
+        replyMarkup,
+        previewMessage,
+        snapshot,
+        sourceChatId,
+        sourceMessageId
+    } = opts;
+
+    if (sourceChatId != null && sourceMessageId != null) {
+        const copied = await copyChannelPostThenSetCaption(telegram, {
+            targetChatId: chatId,
+            sourceChatId,
+            sourceMessageId,
+            htmlCaption,
+            replyMarkup
+        });
+        if (copied?.message_id) return copied;
+        console.warn('channel publish: template copy failed; falling back to sendPhoto');
+    }
 
     const fromPreview = snapshotFromMessage(previewMessage, coverFileId);
     const fromHtml = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
@@ -515,6 +628,7 @@ module.exports = {
     countCustomEmoji,
     sendPhotoWithHtmlCaption,
     sendPhotoPreservingPremiumEmoji,
+    copyChannelPostThenSetCaption,
     photoFileIdFromMessage,
     snapshotFromMessage,
     PHOTO_CAPTION_MAX
