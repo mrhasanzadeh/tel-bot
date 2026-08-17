@@ -5,9 +5,17 @@ const {
     sendPhotoWithHtmlCaption,
     sendPhotoPreservingPremiumEmoji,
     snapshotFromMessage,
-    countCustomEmoji
+    countCustomEmoji,
+    applyReplyMarkup
 } = require('../utils/captionEntities');
-const { getAdminUserId, getAdminUserIds, isAdminUserId, getPublishChannelChoices } = require('../utils/channelIds');
+const {
+    getAdminUserId,
+    getAdminUserIds,
+    isAdminUserId,
+    getPublishChannelChoices,
+    getPublicPostsChannelId,
+    normalizeChatId
+} = require('../utils/channelIds');
 
 /** @typedef {{
  *   coverFileId: string,
@@ -1135,6 +1143,94 @@ async function handleFlushChannelDrafts(bot, ctx) {
     }
 }
 
+function looksLikeShioriEpisodeCaption(caption) {
+    const text = String(caption ?? '');
+    if (!text.trim()) return false;
+    return (
+        /\bE\d{2}\b/i.test(text) ||
+        /\[1080p\]/i.test(text) ||
+        /Softsub/i.test(text) ||
+        /S\d{2}:\s*Episode/i.test(text)
+    );
+}
+
+function alreadyHasMiniAppButton(message) {
+    const rows = message?.reply_markup?.inline_keyboard;
+    if (!Array.isArray(rows)) return false;
+    return rows.flat().some((btn) => {
+        const url = String(btn?.url ?? '');
+        return url.includes('startapp=') && url.includes('anime_');
+    });
+}
+
+function shouldAutoAttachMiniApp(chatId) {
+    const id = normalizeChatId(chatId);
+    if (!id) return false;
+    if (id === getPublicPostsChannelId()) return false;
+    return getPublishChannelChoices().some((ch) => ch.id === id);
+}
+
+/**
+ * After an admin hides-sender forward into Ads (etc.), attach the glass mini-app
+ * button without touching caption/premium emoji.
+ * @param {import('telegraf').Context} ctx
+ */
+async function maybeAttachMiniAppOnChannelPost(ctx) {
+    const post = ctx.channelPost || (
+        ctx.chat?.type === 'channel' || ctx.chat?.type === 'supergroup'
+            ? ctx.message
+            : null
+    );
+    if (!post) return false;
+    if (!shouldAutoAttachMiniApp(ctx.chat?.id)) return false;
+    if (!Array.isArray(post.photo) || !post.photo.length) return false;
+    if (!looksLikeShioriEpisodeCaption(post.caption)) return false;
+    if (alreadyHasMiniAppButton(post)) return false;
+
+    const origin = post.forward_origin;
+    const originChannelId =
+        post.forward_from_chat?.id != null
+            ? String(post.forward_from_chat.id)
+            : origin?.type === 'channel' && origin.chat?.id != null
+              ? String(origin.chat.id)
+              : null;
+    const originMessageId =
+        post.forward_from_message_id != null
+            ? post.forward_from_message_id
+            : origin?.type === 'channel'
+              ? origin.message_id
+              : null;
+
+    try {
+        const resolved = await shioriApi.post('/bot/channel-posts/mini-app-markup', {
+            caption: post.caption,
+            origin_channel_id: originChannelId,
+            origin_message_id: originMessageId
+        });
+        if (!resolved?.matched || !resolved.reply_markup) {
+            console.log(
+                `📋 mini-app auto-attach skipped (no match) chat=${ctx.chat.id} msg=${post.message_id}`
+            );
+            return false;
+        }
+        await applyReplyMarkup(
+            ctx.telegram,
+            ctx.chat.id,
+            post.message_id,
+            resolved.reply_markup
+        );
+        console.log(
+            `📋 mini-app auto-attach ok slug=${resolved.slug || resolved.anime_id} ` +
+                `chat=${ctx.chat.id} msg=${post.message_id}`
+        );
+        return true;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`📋 mini-app auto-attach failed: ${msg}`);
+        return false;
+    }
+}
+
 module.exports = {
     handleBindChannelPost,
     handleBindPickCallback,
@@ -1151,5 +1247,6 @@ module.exports = {
     startChannelDraftPreviewPoller,
     extractChannelPostPayload,
     extractSearchQueryFromCaption,
-    isChannelForwardMessage
+    isChannelForwardMessage,
+    maybeAttachMiniAppOnChannelPost
 };

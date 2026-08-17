@@ -716,6 +716,7 @@ module.exports = {
     copyAdminPreviewToChannel,
     copyPreviewThenSetCaption,
     applyChannelCaptionEdits,
+    applyReplyMarkup,
     repairHtmlCaption,
     photoFileIdFromMessage,
     snapshotFromMessage,

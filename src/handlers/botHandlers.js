@@ -33,7 +33,8 @@ const {
     handleFlushChannelDrafts,
     offerAdminForwardActions,
     handleAdminForwardAction,
-    handleAdminPendingSearchQuery
+    handleAdminPendingSearchQuery,
+    maybeAttachMiniAppOnChannelPost
 } = require('../services/channelDraftService');
 
 // Store pending links for non-member users
@@ -201,6 +202,11 @@ function setupHandlers(bot) {
             if (error.response) {
                 console.error('Telegram API:', error.response.description || error.response);
             }
+        }
+        try {
+            await maybeAttachMiniAppOnChannelPost(ctx);
+        } catch (error) {
+            console.warn('mini-app auto-attach error:', error.message);
         }
         return next();
     });
