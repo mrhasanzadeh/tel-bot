@@ -869,17 +869,10 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             sourceMessageId: prepared.source_message_id || null
         });
         const messageId = sent?.message_id ?? null;
-        const publishedCustom = countCustomEmoji(sent?.caption_entities);
         console.log(
             `📋 channel draft published draft=${draftId} msg=${messageId} ` +
-                `custom_emoji=${publishedCustom}`
+                `path=copy+edit`
         );
-        if (snapshot?.customEmojiCount > 0 && publishedCustom < snapshot.customEmojiCount) {
-            console.warn(
-                `📋 channel draft premium emoji still short draft=${draftId} ` +
-                    `got=${publishedCustom} expected=${snapshot.customEmojiCount}`
-            );
-        }
         draftPreviewSnapshots.delete(String(draftId));
 
         if (!messageId) {

@@ -400,8 +400,47 @@ function normalizeChatIdForCompare(id) {
     return String(id ?? '').trim();
 }
 
+function balanceSimpleHtmlTags(html, tagNames) {
+    let out = String(html ?? '');
+    for (const tag of tagNames) {
+        const tokenRe = new RegExp(`<${tag}\\b[^>]*>|</${tag}>`, 'gi');
+        let depth = 0;
+        let rebuilt = '';
+        let last = 0;
+        let m;
+        while ((m = tokenRe.exec(out))) {
+            rebuilt += out.slice(last, m.index);
+            if (m[0].startsWith('</')) {
+                if (depth > 0) {
+                    rebuilt += m[0];
+                    depth -= 1;
+                }
+            } else {
+                rebuilt += m[0];
+                depth += 1;
+            }
+            last = m.index + m[0].length;
+        }
+        rebuilt += out.slice(last);
+        while (depth > 0) {
+            rebuilt += `</${tag}>`;
+            depth -= 1;
+        }
+        out = rebuilt;
+    }
+    return out;
+}
+
+/** Close orphan &lt;a&gt;/&lt;b&gt; tags before Telegram HTML parse or entity parsing. */
+function repairHtmlCaption(htmlCaption) {
+    let out = String(htmlCaption ?? '');
+    if (!out) return out;
+    out = balanceSimpleHtmlTags(out, ['a', 'b']);
+    return out;
+}
+
 /**
- * Apply caption to an existing channel photo message; HTML first (tg-emoji), then entities.
+ * Apply caption to an existing channel photo message via caption_entities (preferred).
  * @param {import('telegraf').Telegram} telegram
  * @param {string|number} chatId
  * @param {number} messageId
@@ -409,43 +448,56 @@ function normalizeChatIdForCompare(id) {
  * @param {object} [replyMarkup]
  */
 async function applyChannelCaptionEdits(telegram, chatId, messageId, htmlCaption, replyMarkup) {
-    const payload = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
-    const htmlSlice = String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX);
+    const payload = channelCaptionOpts(repairHtmlCaption(htmlCaption), {
+        maxLen: PHOTO_CAPTION_MAX
+    });
+    const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
 
     try {
         const edited = await telegram.editMessageCaption(
             chatId,
             messageId,
             undefined,
-            htmlSlice,
+            payload.caption,
             {
-                parse_mode: 'HTML',
-                ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+                caption_entities: payload.caption_entities,
+                ...extra
             }
         );
-        const msg = edited && typeof edited === 'object' ? edited : null;
-        if (msg && countCustomEmoji(msg.caption_entities) > 0) {
-            console.log(
-                `channel publish: editCaption HTML custom_emoji=${countCustomEmoji(msg.caption_entities)}`
-            );
-            return msg;
-        }
+        console.log(
+            `channel publish: editCaption entities ok entities=${payload.caption_entities.length} ` +
+                `custom_emoji=${payload.caption_entities.filter((e) => e.type === 'custom_emoji').length}`
+        );
+        if (edited && typeof edited === 'object') return edited;
+        return { message_id: messageId };
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish editCaption entities failed: ${msg}`);
+    }
+
+    const safeHtml = repairHtmlCaption(htmlCaption);
+    if (utf16Length(safeHtml) > PHOTO_CAPTION_MAX) {
+        throw new Error(`caption too long for HTML fallback (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`);
+    }
+    try {
+        const edited = await telegram.editMessageCaption(
+            chatId,
+            messageId,
+            undefined,
+            safeHtml,
+            {
+                parse_mode: 'HTML',
+                ...extra
+            }
+        );
+        console.log('channel publish: editCaption HTML ok (fallback)');
+        if (edited && typeof edited === 'object') return edited;
+        return { message_id: messageId };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`channel publish editCaption HTML failed: ${msg}`);
+        throw err instanceof Error ? err : new Error(msg);
     }
-
-    const edited = await telegram.editMessageCaption(
-        chatId,
-        messageId,
-        undefined,
-        payload.caption,
-        {
-            caption_entities: payload.caption_entities,
-            ...(replyMarkup ? { reply_markup: replyMarkup } : {})
-        }
-    );
-    return edited && typeof edited === 'object' ? edited : { message_id: messageId };
 }
 
 /**
@@ -657,11 +709,7 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
                 replyMarkup
             });
             if (fromPreview?.message_id) {
-                const got = countCustomEmoji(fromPreview.caption_entities);
-                if (got > 0) return fromPreview;
-                console.warn(
-                    `channel publish: preview copy lost emoji (got=${got}); trying template copy`
-                );
+                return fromPreview;
             }
         }
 
@@ -672,15 +720,8 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
             htmlCaption,
             replyMarkup
         });
-        if (copied?.message_id) {
-            const got = countCustomEmoji(copied.caption_entities);
-            if (got > 0 || !crossChannel) return copied;
-            console.warn(
-                `channel publish: template cross-copy lost emoji (got=${got}); trying sendPhoto`
-            );
-        } else {
-            console.warn('channel publish: template copy failed; falling back to sendPhoto');
-        }
+        if (copied?.message_id) return copied;
+        console.warn('channel publish: template copy failed; falling back to sendPhoto');
     }
 
     const fromPreview = snapshotFromMessage(previewMessage, coverFileId);
@@ -792,6 +833,7 @@ module.exports = {
     copyChannelPostThenSetCaption,
     copyPreviewThenSetCaption,
     applyChannelCaptionEdits,
+    repairHtmlCaption,
     photoFileIdFromMessage,
     snapshotFromMessage,
     PHOTO_CAPTION_MAX
