@@ -448,37 +448,14 @@ function repairHtmlCaption(htmlCaption) {
  * @param {object} [replyMarkup]
  */
 async function applyChannelCaptionEdits(telegram, chatId, messageId, htmlCaption, replyMarkup) {
-    const payload = channelCaptionOpts(repairHtmlCaption(htmlCaption), {
-        maxLen: PHOTO_CAPTION_MAX
-    });
-    const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
-
-    try {
-        const edited = await telegram.editMessageCaption(
-            chatId,
-            messageId,
-            undefined,
-            payload.caption,
-            {
-                caption_entities: payload.caption_entities,
-                ...extra
-            }
-        );
-        console.log(
-            `channel publish: editCaption entities ok entities=${payload.caption_entities.length} ` +
-                `custom_emoji=${payload.caption_entities.filter((e) => e.type === 'custom_emoji').length}`
-        );
-        if (edited && typeof edited === 'object') return edited;
-        return { message_id: messageId };
-    } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`channel publish editCaption entities failed: ${msg}`);
-    }
-
     const safeHtml = repairHtmlCaption(htmlCaption);
     if (utf16Length(safeHtml) > PHOTO_CAPTION_MAX) {
-        throw new Error(`caption too long for HTML fallback (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`);
+        throw new Error(
+            `channel publish caption too long (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`
+        );
     }
+    const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
+
     try {
         const edited = await telegram.editMessageCaption(
             chatId,
@@ -490,12 +467,32 @@ async function applyChannelCaptionEdits(telegram, chatId, messageId, htmlCaption
                 ...extra
             }
         );
-        console.log('channel publish: editCaption HTML ok (fallback)');
+        console.log('channel publish: editCaption HTML ok');
         if (edited && typeof edited === 'object') return edited;
         return { message_id: messageId };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`channel publish editCaption HTML failed: ${msg}`);
+    }
+
+    const payload = channelCaptionOpts(safeHtml, { maxLen: PHOTO_CAPTION_MAX });
+    try {
+        const edited = await telegram.editMessageCaption(
+            chatId,
+            messageId,
+            undefined,
+            payload.caption,
+            {
+                caption_entities: payload.caption_entities,
+                ...extra
+            }
+        );
+        console.log('channel publish: editCaption entities ok (fallback)');
+        if (edited && typeof edited === 'object') return edited;
+        return { message_id: messageId };
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish editCaption entities failed: ${msg}`);
         throw err instanceof Error ? err : new Error(msg);
     }
 }
@@ -521,35 +518,34 @@ async function copyChannelPostThenSetCaption(telegram, opts) {
     }
 
     const crossChannel = !sameChatId(targetChatId, sourceChatId);
-    const payload = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
 
     if (!crossChannel) {
-        const extra = {
-            caption: payload.caption,
-            caption_entities: payload.caption_entities,
-            ...(replyMarkup ? { reply_markup: replyMarkup } : {})
-        };
+        const safeHtml = repairHtmlCaption(htmlCaption);
+        if (utf16Length(safeHtml) > PHOTO_CAPTION_MAX) {
+            throw new Error(
+                `channel publish caption too long (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`
+            );
+        }
         try {
             const copied = await telegram.copyMessage(
                 targetChatId,
                 sourceChatId,
                 Number(sourceMessageId),
-                extra
+                {
+                    caption: safeHtml,
+                    parse_mode: 'HTML',
+                    ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+                }
             );
             const messageId = typeof copied === 'number' ? copied : copied?.message_id;
             if (!messageId) return null;
-            const msg =
-                copied && typeof copied === 'object'
-                    ? copied
-                    : { message_id: messageId, caption_entities: payload.caption_entities };
             console.log(
-                `channel publish: same-channel copy+caption ${sourceChatId}/${sourceMessageId} ` +
-                    `custom_emoji=${countCustomEmoji(msg.caption_entities)}`
+                `channel publish: same-channel copy+HTML ${sourceChatId}/${sourceMessageId}`
             );
-            return msg;
+            return { message_id: messageId };
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`channel publish same-channel copy+caption failed: ${msg}`);
+            console.warn(`channel publish same-channel copy+HTML failed: ${msg}`);
         }
 
         let copiedId = null;
@@ -582,8 +578,7 @@ async function copyChannelPostThenSetCaption(telegram, opts) {
         }
     }
 
-    // Cross-channel (e.g. TheShioriSub template → Shiori Ads): never inject caption_entities
-    // in copyMessage — Telegram often keeps premium emoji only on a plain copy, then edit.
+    // Cross-channel template fallback (prefer admin preview copy-only instead).
     let copiedId = null;
     try {
         const copied = await telegram.copyMessage(
@@ -622,68 +617,50 @@ async function copyChannelPostThenSetCaption(telegram, opts) {
 }
 
 /**
- * Copy the admin preview DM (already has premium emoji) into the target channel.
+ * Copy the admin preview DM into the target channel without touching the caption.
+ * Preview was already sent with premium emoji; editMessageCaption strips them in channels.
+ *
  * @param {import('telegraf').Telegram} telegram
  * @param {object} opts
  * @param {string|number} opts.targetChatId
  * @param {import('telegraf/types').Message} opts.previewMessage
- * @param {string} opts.htmlCaption
  * @param {object} [opts.replyMarkup]
  */
-async function copyPreviewThenSetCaption(telegram, opts) {
-    const { targetChatId, previewMessage, htmlCaption, replyMarkup } = opts;
+async function copyAdminPreviewToChannel(telegram, opts) {
+    const { targetChatId, previewMessage, replyMarkup } = opts;
     const previewChatId = previewMessage?.chat?.id;
     const previewMessageId = previewMessage?.message_id;
     if (previewChatId == null || previewMessageId == null) return null;
     if (sameChatId(previewChatId, targetChatId)) return null;
 
-    let copiedId = null;
     try {
         const copied = await telegram.copyMessage(
             targetChatId,
             previewChatId,
             Number(previewMessageId)
         );
-        copiedId = typeof copied === 'number' ? copied : copied?.message_id ?? null;
-        if (!copiedId) return null;
+        const messageId = typeof copied === 'number' ? copied : copied?.message_id ?? null;
+        if (!messageId) return null;
         console.log(
-            `channel publish: copied admin preview ${previewChatId}/${previewMessageId} → ${targetChatId}/${copiedId}`
+            `channel publish: preview copy-only ${previewChatId}/${previewMessageId} → ${targetChatId}/${messageId}`
         );
-        return applyChannelCaptionEdits(
-            telegram,
-            targetChatId,
-            copiedId,
-            htmlCaption,
-            replyMarkup
-        );
+        await applyReplyMarkup(telegram, targetChatId, messageId, replyMarkup);
+        return { message_id: messageId };
     } catch (err) {
         const fail = err instanceof Error ? err.message : String(err);
-        console.warn(`channel publish preview copy failed: ${fail}`);
-        if (copiedId) {
-            try {
-                await telegram.deleteMessage(targetChatId, copiedId);
-            } catch {
-                /* ignore */
-            }
-        }
+        console.warn(`channel publish preview copy-only failed: ${fail}`);
         return null;
     }
 }
 
+/** @deprecated use copyAdminPreviewToChannel — kept for tests */
+async function copyPreviewThenSetCaption(telegram, opts) {
+    return copyAdminPreviewToChannel(telegram, opts);
+}
+
 /**
- * Publish channel photo without dropping premium emoji.
- * Prefer copying a bound channel template; sendPhoto to channels drops custom_emoji.
- *
- * @param {import('telegraf').Telegram} telegram
- * @param {object} opts
- * @param {string|number} opts.chatId
- * @param {string} opts.coverFileId
- * @param {string} opts.htmlCaption
- * @param {object} [opts.replyMarkup]
- * @param {string|number} [opts.sourceChatId]
- * @param {string|number} [opts.sourceMessageId]
- * @param {import('telegraf/types').Message} [opts.previewMessage]
- * @param {{ photoFileId?: string|null, caption: string, caption_entities: object[], customEmojiCount?: number }|null} [opts.snapshot]
+ * Publish a channel-draft photo. Premium emoji survive only when the caption is not
+ * re-built for channels — copy the admin preview verbatim, or send fresh HTML tg-emoji.
  */
 async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
     const {
@@ -692,133 +669,56 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
         htmlCaption,
         replyMarkup,
         previewMessage,
-        snapshot,
         sourceChatId,
         sourceMessageId
     } = opts;
 
-    if (sourceChatId != null && sourceMessageId != null) {
-        const crossChannel = !sameChatId(chatId, sourceChatId);
+    if (previewMessage) {
+        const copied = await copyAdminPreviewToChannel(telegram, {
+            targetChatId: chatId,
+            previewMessage,
+            replyMarkup
+        });
+        if (copied?.message_id) return copied;
+    }
 
-        // Admin preview DM → Ads: preview already shows premium emoji correctly.
-        if (crossChannel && previewMessage) {
-            const fromPreview = await copyPreviewThenSetCaption(telegram, {
-                targetChatId: chatId,
-                previewMessage,
-                htmlCaption,
-                replyMarkup
-            });
-            if (fromPreview?.message_id) {
-                return fromPreview;
-            }
-        }
+    const safeHtml = repairHtmlCaption(htmlCaption);
+    if (utf16Length(safeHtml) > PHOTO_CAPTION_MAX) {
+        throw new Error(
+            `channel publish caption too long (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`
+        );
+    }
 
+    try {
+        const sent = await telegram.sendPhoto(chatId, coverFileId, {
+            caption: safeHtml,
+            parse_mode: 'HTML',
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+        });
+        console.log('channel publish: sendPhoto+HTML (no preview copy)');
+        return sent;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`channel publish sendPhoto+HTML failed: ${msg}`);
+    }
+
+    if (
+        sourceChatId != null &&
+        sourceMessageId != null &&
+        sameChatId(chatId, sourceChatId)
+    ) {
         const copied = await copyChannelPostThenSetCaption(telegram, {
             targetChatId: chatId,
             sourceChatId,
             sourceMessageId,
-            htmlCaption,
+            htmlCaption: safeHtml,
             replyMarkup
         });
         if (copied?.message_id) return copied;
-        console.warn('channel publish: template copy failed; falling back to sendPhoto');
     }
 
-    const fromPreview = snapshotFromMessage(previewMessage, coverFileId);
-    const fromHtml = channelCaptionOpts(htmlCaption, { maxLen: PHOTO_CAPTION_MAX });
-    const preferred =
-        snapshot && snapshot.caption
-            ? {
-                  photoFileId: snapshot.photoFileId || coverFileId,
-                  caption: snapshot.caption,
-                  caption_entities: snapshot.caption_entities || [],
-                  customEmojiCount:
-                      snapshot.customEmojiCount ??
-                      countCustomEmoji(snapshot.caption_entities)
-              }
-            : fromPreview && fromPreview.customEmojiCount > 0
-              ? fromPreview
-              : {
-                    photoFileId: coverFileId,
-                    caption: fromHtml.caption,
-                    caption_entities: fromHtml.caption_entities,
-                    customEmojiCount: countCustomEmoji(fromHtml.caption_entities)
-                };
-
-    const photo = preferred.photoFileId || coverFileId;
-    const expected = preferred.customEmojiCount;
-    console.log(
-        `channel publish: custom_emoji expected=${expected} ` +
-            `entities=${preferred.caption_entities.length} source=${
-                snapshot ? 'snapshot' : fromPreview?.customEmojiCount ? 'callback' : 'html'
-            }`
-    );
-
-    /** @type {import('telegraf/types').Message.PhotoMessage | null} */
-    let sent = null;
-    let lastErr = null;
-
-    // 1) caption_entities without keyboard (markup can break some entity sends)
-    try {
-        sent = await telegram.sendPhoto(chatId, photo, {
-            caption: preferred.caption,
-            caption_entities: preferred.caption_entities
-        });
-        console.log('channel publish: sendPhoto+entities ok');
-    } catch (err) {
-        lastErr = err;
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`channel publish entities failed: ${msg}`);
-    }
-
-    // 2) HTML parse_mode (Telegram builds custom_emoji itself)
-    if (!sent) {
-        try {
-            sent = await telegram.sendPhoto(chatId, photo, {
-                caption: String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX),
-                parse_mode: 'HTML'
-            });
-            console.log('channel publish: sendPhoto+HTML ok');
-        } catch (err) {
-            lastErr = err;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`channel publish HTML failed: ${msg}`);
-        }
-    }
-
-    // 3) photo first, then editMessageCaption (same pattern as schedule fallback)
-    if (!sent) {
-        try {
-            sent = await telegram.sendPhoto(chatId, photo);
-            await telegram.editMessageCaption(
-                chatId,
-                sent.message_id,
-                undefined,
-                preferred.caption,
-                { caption_entities: preferred.caption_entities }
-            );
-            console.log('channel publish: sendPhoto+editCaption ok');
-        } catch (err) {
-            lastErr = err;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`channel publish editCaption failed: ${msg}`);
-            sent = null;
-        }
-    }
-
-    if (!sent) {
-        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'unknown');
-        throw new Error(`channel publish failed while preserving premium emoji: ${msg}`);
-    }
-
-    return repairCaptionIfPremiumLost(
-        telegram,
-        chatId,
-        sent,
-        preferred.caption,
-        preferred.caption_entities,
-        replyMarkup,
-        expected
+    throw new Error(
+        'channel publish failed: could not copy admin preview or send HTML caption'
     );
 }
 
@@ -831,6 +731,7 @@ module.exports = {
     sendPhotoWithHtmlCaption,
     sendPhotoPreservingPremiumEmoji,
     copyChannelPostThenSetCaption,
+    copyAdminPreviewToChannel,
     copyPreviewThenSetCaption,
     applyChannelCaptionEdits,
     repairHtmlCaption,

@@ -870,8 +870,7 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
         });
         const messageId = sent?.message_id ?? null;
         console.log(
-            `📋 channel draft published draft=${draftId} msg=${messageId} ` +
-                `path=copy+edit`
+            `📋 channel draft published draft=${draftId} msg=${messageId}`
         );
         draftPreviewSnapshots.delete(String(draftId));
 
