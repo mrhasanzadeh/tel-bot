@@ -853,18 +853,13 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             throw new Error('publish payload incomplete');
         }
 
-        // Copy the bound channel template (premium emoji already live there).
-        // sendPhoto to a channel from file_id silently turns custom_emoji into unicode.
-        const snapshot =
-            takeDraftPreviewSnapshot(draftId) ||
-            snapshotFromMessage(ctx.callbackQuery?.message, cover);
+        // Copy the bound TheShioriSub post as-is. Bot API drops custom_emoji when
+        // copying a private preview or rebuilding caption for a channel.
         const sent = await sendPhotoPreservingPremiumEmoji(ctx.telegram, {
             chatId: targetChannelId,
             coverFileId: cover,
             htmlCaption: caption,
             replyMarkup: prepared.reply_markup || undefined,
-            previewMessage: ctx.callbackQuery?.message || null,
-            snapshot,
             sourceChatId: prepared.source_chat_id || null,
             sourceMessageId: prepared.source_message_id || null
         });
@@ -890,8 +885,10 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
 
         await ctx.reply(
-            `${e('success')} منتشر شد در <b>${escapeHtml(label)}</b>.\n` +
-                `message_id: <code>${escapeHtml(String(messageId))}</code>`,
+            `${e('success')} کپی شد در <b>${escapeHtml(label)}</b> با اموجی پرمیوم قالب.\n` +
+                `message_id: <code>${escapeHtml(String(messageId))}</code>\n` +
+                `${e('info')} کپشن کانال همان پست bind است؛ Bot API کپشن جدید را در کانال بدون پرمیوم می‌فرستد.\n` +
+                `کپشن پیشنهادی با قسمت جدید در پیش‌نمایش همین چت است.`,
             htmlOpts()
         );
     } catch (error) {

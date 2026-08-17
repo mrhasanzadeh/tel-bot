@@ -659,8 +659,8 @@ async function copyPreviewThenSetCaption(telegram, opts) {
 }
 
 /**
- * Publish a channel-draft photo. Premium emoji survive only when the caption is not
- * re-built for channels — copy the admin preview verbatim, or send fresh HTML tg-emoji.
+ * Copy a bound CHANNEL post as-is. Bot API drops custom_emoji when sending or
+ * editing captions on channels, and when copying a private preview into a channel.
  */
 async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
     const {
@@ -673,52 +673,31 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
         sourceMessageId
     } = opts;
 
-    if (previewMessage) {
-        const copied = await copyAdminPreviewToChannel(telegram, {
-            targetChatId: chatId,
-            previewMessage,
-            replyMarkup
-        });
-        if (copied?.message_id) return copied;
-    }
-
-    const safeHtml = repairHtmlCaption(htmlCaption);
-    if (utf16Length(safeHtml) > PHOTO_CAPTION_MAX) {
-        throw new Error(
-            `channel publish caption too long (${utf16Length(safeHtml)}/${PHOTO_CAPTION_MAX})`
-        );
-    }
-
-    try {
-        const sent = await telegram.sendPhoto(chatId, coverFileId, {
-            caption: safeHtml,
-            parse_mode: 'HTML',
-            ...(replyMarkup ? { reply_markup: replyMarkup } : {})
-        });
-        console.log('channel publish: sendPhoto+HTML (no preview copy)');
-        return sent;
-    } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`channel publish sendPhoto+HTML failed: ${msg}`);
-    }
-
-    if (
-        sourceChatId != null &&
-        sourceMessageId != null &&
-        sameChatId(chatId, sourceChatId)
-    ) {
-        const copied = await copyChannelPostThenSetCaption(telegram, {
-            targetChatId: chatId,
-            sourceChatId,
-            sourceMessageId,
-            htmlCaption: safeHtml,
-            replyMarkup
-        });
-        if (copied?.message_id) return copied;
+    if (sourceChatId != null && sourceMessageId != null) {
+        const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
+        try {
+            const copied = await telegram.copyMessage(
+                chatId,
+                sourceChatId,
+                Number(sourceMessageId),
+                extra
+            );
+            const messageId =
+                typeof copied === 'number' ? copied : copied?.message_id ?? null;
+            if (messageId) {
+                console.log(
+                    `channel publish: template copy-only ${sourceChatId}/${sourceMessageId} → ${chatId}/${messageId}`
+                );
+                return { message_id: messageId };
+            }
+        } catch (err) {
+            const fail = err instanceof Error ? err.message : String(err);
+            console.warn(`channel publish template copy-only failed: ${fail}`);
+        }
     }
 
     throw new Error(
-        'channel publish failed: could not copy admin preview or send HTML caption'
+        'channel publish failed: bind TheShioriSub template is missing or copy failed'
     );
 }
 
