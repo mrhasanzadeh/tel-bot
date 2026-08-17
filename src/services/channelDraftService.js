@@ -7,7 +7,8 @@ const {
 } = require('../utils/captionEntities');
 const {
     getAdminUserIds,
-    isAdminUserId
+    isAdminUserId,
+    getPublishChannelChoices
 } = require('../utils/channelIds');
 
 /** @typedef {{
@@ -700,13 +701,42 @@ async function handleBindCancelCallback(ctx, bindId) {
 }
 
 /**
- * Admin preview keyboard: reject + optional mini-app link.
+ * Admin preview keyboard: one button per publish target + reject + mini-app.
  * @param {string} draftId
  * @param {string} animeId
  */
 function buildDraftPreviewKeyboard(draftId, animeId) {
+    const channels = getPublishChannelChoices();
     /** @type {Array<Array<{ text: string, callback_data?: string, url?: string }>>} */
-    const rows = [[{ text: 'رد', callback_data: `chdraft_no_${draftId}` }]];
+    const rows = [];
+
+    if (channels.length === 0) {
+        rows.push([
+            {
+                text: 'انتشار (کانال تنظیم نشده)',
+                callback_data: `chdraft_ok_${draftId}`
+            }
+        ]);
+    } else if (channels.length === 1) {
+        rows.push([
+            {
+                text: `ارسال به ${channels[0].label}`,
+                callback_data: `chdraft_ch_${draftId}_0`
+            }
+        ]);
+    } else {
+        for (let i = 0; i < channels.length; i++) {
+            const ch = channels[i];
+            rows.push([
+                {
+                    text: `ارسال به ${ch.label}`,
+                    callback_data: `chdraft_ch_${draftId}_${i}`
+                }
+            ]);
+        }
+    }
+
+    rows.push([{ text: 'رد', callback_data: `chdraft_no_${draftId}` }]);
 
     const { buildAnimeEpisodesMiniAppUrl } = require('../utils/miniAppLinks');
     const miniUrl = buildAnimeEpisodesMiniAppUrl(animeId);
@@ -725,14 +755,16 @@ function buildDraftPreviewKeyboard(draftId, animeId) {
 /**
  * @param {import('telegraf').Context} ctx
  * @param {string} draftId
+ * @param {'publish' | 'reject'} action
+ * @param {string} [channelIdOverride]
  */
-async function handleChannelDraftCallback(ctx, draftId) {
+async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverride) {
     if (!isAdminUserId(ctx.from?.id)) {
         await ctx.answerCbQuery('فقط ادمین.', { show_alert: true });
         return;
     }
 
-    await ctx.answerCbQuery('رد شد');
+    await ctx.answerCbQuery(action === 'publish' ? 'در حال انتشار...' : 'رد شد');
 
     try {
         try {
@@ -741,15 +773,108 @@ async function handleChannelDraftCallback(ctx, draftId) {
             /* ignore */
         }
 
-        await shioriApi.post(`/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`);
-        await ctx.reply(`${e('stop')} پیش‌نویس رد شد.`, htmlOpts());
+        if (action === 'reject') {
+            await shioriApi.post(`/bot/channel-drafts/${encodeURIComponent(draftId)}/reject`);
+            await ctx.reply(`${e('stop')} پیش‌نویس رد شد.`, htmlOpts());
+            return;
+        }
+
+        const channels = getPublishChannelChoices();
+        let channelId = String(channelIdOverride ?? '').trim();
+
+        if (!channelId) {
+            if (channels.length === 1) {
+                channelId = channels[0].id;
+            } else if (channels.length > 1) {
+                await ctx.editMessageReplyMarkup({
+                    inline_keyboard: channels.map((ch, i) => [
+                        {
+                            text: `ارسال به ${ch.label}`,
+                            callback_data: `chdraft_ch_${draftId}_${i}`
+                        }
+                    ]).concat([[{ text: 'رد', callback_data: `chdraft_no_${draftId}` }]])
+                });
+                await ctx.reply(
+                    `${e('info')} کانال مقصد را از دکمه‌های زیر پیش‌نمایش انتخاب کن.`,
+                    htmlOpts()
+                );
+                return;
+            }
+        }
+
+        const prepared = await shioriApi.post(
+            `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`,
+            channelId ? { channel_id: channelId } : {}
+        );
+
+        if (prepared?.already_published) {
+            await ctx.reply(`${e('info')} قبلاً منتشر شده بود.`, htmlOpts());
+            return;
+        }
+
+        if (!prepared?.needs_bot_send) {
+            throw new Error('publish payload missing needs_bot_send');
+        }
+
+        const targetChannelId = String(prepared.channel_id || channelId || '').trim();
+        const cover = prepared.cover_file_id;
+        const caption = prepared.caption;
+        if (!targetChannelId || !cover || !caption) {
+            throw new Error('publish payload incomplete');
+        }
+
+        const sent = await ctx.telegram.sendPhoto(targetChannelId, cover, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: prepared.reply_markup || undefined
+        });
+
+        const messageId = sent?.message_id ?? null;
+        console.log(`📋 channel draft published draft=${draftId} msg=${messageId}`);
+
+        if (!messageId) {
+            throw new Error('sendPhoto returned no message_id');
+        }
+
+        await shioriApi.post(
+            `/bot/channel-drafts/${encodeURIComponent(draftId)}/mark-published`,
+            {
+                published_message_id: messageId,
+                channel_id: targetChannelId
+            }
+        );
+
+        const label =
+            channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
+
+        await ctx.reply(
+            `${e('success')} منتشر شد در <b>${escapeHtml(label)}</b>.\n` +
+                `message_id: <code>${escapeHtml(String(messageId))}</code>\n` +
+                `${e('info')} کپشن را در کانال ادیت کن و متن پیش‌نمایش را جایگزین کن تا اموجی پرمیوم حفظ شود.`,
+            htmlOpts()
+        );
     } catch (error) {
-        console.error('channel draft reject error:', error);
+        console.error('channel draft callback error:', error);
         await ctx.reply(
             `${e('error')} خطا: ${escapeHtml(error.message)}`,
             htmlOpts()
         );
     }
+}
+
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {string} draftId
+ * @param {number} channelIndex
+ */
+async function handleChannelDraftPublishTo(ctx, draftId, channelIndex) {
+    const channels = getPublishChannelChoices();
+    const ch = channels[channelIndex];
+    if (!ch) {
+        await ctx.answerCbQuery('کانال نامعتبر.', { show_alert: true });
+        return;
+    }
+    await handleChannelDraftCallback(ctx, draftId, 'publish', ch.id);
 }
 
 /**
@@ -826,7 +951,7 @@ async function deliverPendingChannelDraftPreviews(bot) {
                         chatId,
                         `پیش‌نویس پست کانال\n` +
                             `<b>${escapeHtml(String(item.anime_title || ''))}</b> — قسمت ${escapeHtml(String(item.episode_number ?? ''))}\n` +
-                            `${e('info')} خودت عکس را در کانال منتشر کن؛ بعد از انتشار یک لحظه کپشن را ویرایش کن و متن همین پیش‌نمایش را جایگزین کن تا اموجی پرمیوم حفظ شود.`,
+                            `کانال مقصد را از دکمه‌های زیر عکس انتخاب کن.`,
                         htmlOpts()
                     );
 
@@ -977,6 +1102,7 @@ module.exports = {
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
+    handleChannelDraftPublishTo,
     handleClearChannelDrafts,
     handleFlushChannelDrafts,
     offerAdminForwardActions,

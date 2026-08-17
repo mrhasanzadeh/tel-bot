@@ -28,6 +28,7 @@ const {
     handleBindRetryCallback,
     handleBindCancelCallback,
     handleChannelDraftCallback,
+    handleChannelDraftPublishTo,
     handleClearChannelDrafts,
     handleFlushChannelDrafts,
     offerAdminForwardActions,
@@ -378,8 +379,18 @@ function setupHandlers(bot) {
         }
     });
 
+    bot.action(/^chdraft_ok_([0-9a-f-]{36})$/i, async (ctx) => {
+        await handleChannelDraftCallback(ctx, ctx.match[1], 'publish');
+    });
+    bot.action(/^chdraft_ch_([0-9a-f-]{36})_(\d+)$/i, async (ctx) => {
+        await handleChannelDraftPublishTo(
+            ctx,
+            ctx.match[1],
+            Number.parseInt(ctx.match[2], 10)
+        );
+    });
     bot.action(/^chdraft_no_([0-9a-f-]{36})$/i, async (ctx) => {
-        await handleChannelDraftCallback(ctx, ctx.match[1]);
+        await handleChannelDraftCallback(ctx, ctx.match[1], 'reject');
     });
 
     bot.command('mirroring', async (ctx) => {
