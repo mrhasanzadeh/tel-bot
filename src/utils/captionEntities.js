@@ -674,13 +674,12 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
     } = opts;
 
     if (sourceChatId != null && sourceMessageId != null) {
-        const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
         try {
+            // Copy with no caption/markup override so custom_emoji stay intact.
             const copied = await telegram.copyMessage(
                 chatId,
                 sourceChatId,
-                Number(sourceMessageId),
-                extra
+                Number(sourceMessageId)
             );
             const messageId =
                 typeof copied === 'number' ? copied : copied?.message_id ?? null;
@@ -688,6 +687,10 @@ async function sendPhotoPreservingPremiumEmoji(telegram, opts) {
                 console.log(
                     `channel publish: template copy-only ${sourceChatId}/${sourceMessageId} → ${chatId}/${messageId}`
                 );
+                if (replyMarkup) {
+                    await applyReplyMarkup(telegram, chatId, messageId, replyMarkup);
+                    console.log('channel publish: glass button applied via reply_markup');
+                }
                 return { message_id: messageId };
             }
         } catch (err) {

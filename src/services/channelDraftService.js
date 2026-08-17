@@ -885,10 +885,10 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
 
         await ctx.reply(
-            `${e('success')} کپی شد در <b>${escapeHtml(label)}</b> با اموجی پرمیوم قالب.\n` +
+            `${e('success')} کپی شد در <b>${escapeHtml(label)}</b>.\n` +
                 `message_id: <code>${escapeHtml(String(messageId))}</code>\n` +
-                `${e('info')} کپشن کانال همان پست bind است؛ Bot API کپشن جدید را در کانال بدون پرمیوم می‌فرستد.\n` +
-                `کپشن پیشنهادی با قسمت جدید در پیش‌نمایش همین چت است.`,
+                `${e('info')} اموجی پرمیوم از پست bind + دکمه مینی‌اپ جدا روی پست.\n` +
+                `کپشن همان قالب است؛ متن قسمت جدید را از پیش‌نمایش همین چت می‌توانی دستی جایگزین کنی.`,
             htmlOpts()
         );
     } catch (error) {
