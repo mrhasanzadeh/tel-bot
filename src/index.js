@@ -12,7 +12,6 @@ const { runStartupSecurityChecks } = require('./services/botSecurity');
 const scheduleService = require('./services/scheduleService');
 const archiveMirrorService = require('./services/archiveMirrorService');
 const { startChannelDraftPreviewPoller } = require('./services/channelDraftService');
-const { startMiniAppBot } = require('./services/miniAppBotService');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -44,8 +43,6 @@ if (!process.env.LINKS_CHANNEL_ID?.trim()) {
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-/** @type {import('telegraf').Telegraf | null} */
-let miniAppBot = null;
 
 membershipService.setTelegram(bot);
 scheduleService.setTelegram(bot);
@@ -78,11 +75,6 @@ async function start() {
     // Telegraf's bot.launch() Promise resolves only when the bot *stops*.
     // Start background jobs before awaiting launch, otherwise they never run.
     startChannelDraftPreviewPoller(bot);
-    try {
-        miniAppBot = await startMiniAppBot();
-    } catch (err) {
-        console.error('⚠️ Mini App bot failed to start:', err);
-    }
     console.log('✅ Bot started successfully');
 
     await bot.launch({
@@ -102,14 +94,8 @@ start().catch((err) => {
     process.exit(1);
 });
 
-process.once('SIGINT', () => {
-    miniAppBot?.stop('SIGINT');
-    bot.stop('SIGINT');
-});
-process.once('SIGTERM', () => {
-    miniAppBot?.stop('SIGTERM');
-    bot.stop('SIGTERM');
-});
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 module.exports = {
     bot
