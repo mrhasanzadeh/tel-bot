@@ -13,6 +13,13 @@ const parseEnvBool = (value, defaultValue = true) => {
 module.exports = {
     parseEnvBool,
     BOT_TOKEN: process.env.BOT_TOKEN,
+    /** Token for @ShioriMiniBot — /start welcome (separate from upload bot). */
+    MINI_APP_BOT_TOKEN:
+        process.env.MINI_APP_BOT_TOKEN ||
+        process.env.TELEGRAM_MINI_APP_BOT_TOKEN ||
+        '',
+    /** Public mini-app URL for web_app entry button. */
+    MINI_APP_URL: String(process.env.MINI_APP_URL ?? '').trim().replace(/\/$/, ''),
     /** Username of the bot that hosts the Mini App (no @). Used for startapp deep links. */
     TELEGRAM_MINI_APP_BOT_USERNAME:
         process.env.TELEGRAM_MINI_APP_BOT_USERNAME ||

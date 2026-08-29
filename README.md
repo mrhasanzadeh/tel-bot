@@ -45,6 +45,8 @@ Telegram bot for sharing files with channel membership verification, pack downlo
 |----------|---------|
 | `BOT_TOKEN` | Telegram bot token |
 | `TELEGRAM_BOT_USERNAME` | Bot username for Mini App `startapp` links (no `@`) |
+| `MINI_APP_BOT_TOKEN` | `@ShioriMiniBot` token — `/start` welcome (API host often blocks Telegram) |
+| `MINI_APP_URL` | Public mini-app URL for entry button (e.g. `https://shiori.cloud`) |
 | `SHIORI_API_URL` | Shiori API base URL (e.g. `https://api.shiori.cloud`) |
 | `BOT_API_TOKEN` | Shared secret for `x-bot-token` header |
 | `PRIVATE_CHANNEL_ID` | Links channel (keys/captions, file storage ref) |
@@ -91,6 +93,10 @@ docker compose up -d
 Schedule channel posts include a glass **دانلود از مینی‌اپ** button when `catalog_anime_id` is set (auto-matched on registration by slug, or via `/link_catalog`).
 
 After binding a channel template, adding an episode in the admin panel DMs you a draft post; approve to publish to the posts channel.
+
+### @ShioriMiniBot (Mini App host)
+
+When `MINI_APP_BOT_TOKEN` is set, tel-bot also polls the Mini App bot and replies to `/start` with a welcome message + **ورود به مینی‌شیوری** button. Run this on the host that can reach `api.telegram.org` (not the API container).
 
 ## License
 
