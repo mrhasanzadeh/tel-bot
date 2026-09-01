@@ -35,6 +35,13 @@ const {
     handleAdminForwardAction,
     handleAdminPendingSearchQuery
 } = require('../services/channelDraftService');
+const {
+    handleChannelPostCommand,
+    handleChannelPostForward,
+    handleChannelPostText,
+    handleChannelPostPublish,
+    handleChannelPostCancel
+} = require('../services/channelPostService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -333,6 +340,24 @@ function setupHandlers(bot) {
             console.error('flush_channel_drafts error:', error);
             await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
         }
+    });
+
+    bot.command('channel_post', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            await handleChannelPostCommand(ctx);
+        } catch (error) {
+            console.error('channel_post error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
+    bot.action('cpost_send', async (ctx) => {
+        await handleChannelPostPublish(ctx);
+    });
+
+    bot.action('cpost_cancel', async (ctx) => {
+        await handleChannelPostCancel(ctx);
     });
 
     // bp:{bindId}:{animeUuid} — pick anime for channel template bind
@@ -686,6 +711,9 @@ function setupHandlers(bot) {
             if (isMonitoredChannelChat(ctx)) return;
             if (!isAdminUserId(ctx.from?.id)) return;
             if (ctx.chat?.type === 'private') {
+                const handledChannelPost = await handleChannelPostForward(ctx);
+                if (handledChannelPost) return;
+
                 const offered = await offerAdminForwardActions(ctx);
                 if (offered) return;
             }
@@ -693,6 +721,21 @@ function setupHandlers(bot) {
         } catch (error) {
             console.error('❌ Schedule cover photo / admin forward handler:', error);
         }
+    });
+
+    // Admin: forward channel posts (text-only) for /channel_post target capture
+    bot.on('message', async (ctx, next) => {
+        try {
+            if (ctx.chat?.type !== 'private') return next();
+            if (!isAdminUserId(ctx.from?.id)) return next();
+            if (ctx.message?.photo || ctx.message?.document) return next();
+
+            const handledChannelPost = await handleChannelPostForward(ctx);
+            if (handledChannelPost) return;
+        } catch (error) {
+            console.error('channel_post forward handler:', error);
+        }
+        return next();
     });
 
     // Handle file requests (private chats only — not archive/supergroup channels)
@@ -705,6 +748,9 @@ function setupHandlers(bot) {
             if (rawText.startsWith('/')) return;
 
             if (isAdminUserId(ctx.from.id)) {
+                const handledChannelPostText = await handleChannelPostText(ctx);
+                if (handledChannelPostText) return;
+
                 const handledSearch = await handleAdminPendingSearchQuery(ctx);
                 if (handledSearch) return;
 

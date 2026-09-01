@@ -40,6 +40,30 @@ function buildAnimeEpisodesMiniAppUrl(catalogAnimeId) {
     return `https://t.me/${bot}?startapp=${encodeURIComponent(`anime_${id}_episodes`)}`;
 }
 
+/** Opens mini-app home (launch / generic channel CTA). */
+function buildMiniAppHomeUrl() {
+    const bot = getMiniAppBotUsername();
+    return `https://t.me/${bot}?startapp`;
+}
+
+/**
+ * Glass-style url button for generic mini-app entry.
+ * @param {string} [buttonText]
+ * @returns {{ inline_keyboard: import('telegraf/types').InlineKeyboardButton[][] }}
+ */
+function buildMiniAppHomeKeyboard(buttonText = 'ورود به مینی‌اپ') {
+    return {
+        inline_keyboard: [
+            [
+                inlineButton({
+                    text: buttonText,
+                    url: buildMiniAppHomeUrl()
+                })
+            ]
+        ]
+    };
+}
+
 /**
  * Glass-style url button under channel posts.
  * @param {string | null | undefined} catalogAnimeId
@@ -65,5 +89,7 @@ module.exports = {
     getBotUsername,
     getMiniAppBotUsername,
     buildAnimeEpisodesMiniAppUrl,
+    buildMiniAppHomeUrl,
+    buildMiniAppHomeKeyboard,
     buildMiniAppDownloadKeyboard
 };
