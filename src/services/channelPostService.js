@@ -2,6 +2,7 @@ const config = require('../../config');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const {
     countCustomEmoji,
+    htmlToCaptionPayload,
     messageEntityOpts,
     sendMessageWithEntities
 } = require('../utils/captionEntities');
@@ -23,6 +24,7 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
  *   entities?: object[],
  *   previewChatId?: string,
  *   previewMessageId?: number,
+ *   sourceHtml?: string,
  *   expiresAt: number
  * }} ChannelPostSession */
 
@@ -238,10 +240,13 @@ async function handleChannelPostText(ctx) {
         return true;
     }
 
+    const sourceHtml = /<tg-emoji\b/i.test(text) ? text : undefined;
+
     touchSession(adminId, {
         step: 'confirm',
         text: payload.text,
-        entities: payload.entities
+        entities: payload.entities,
+        sourceHtml
     });
 
     const fresh = getSession(adminId);
@@ -279,49 +284,28 @@ async function handleChannelPostText(ctx) {
 }
 
 /**
- * Publish by copying the validated preview message (preserves premium emoji entities).
+ * Publish the preview body to the channel (sendMessage + entities — not copyMessage).
+ * copyMessage strips custom_emoji when copying from admin DM into a channel.
  * @param {import('telegraf').Telegram} telegram
  * @param {ChannelPostSession} session
  * @param {import('telegraf/types').Message | undefined} previewMsg
  */
 async function publishChannelPostFromPreview(telegram, session, previewMsg) {
     const markup = buildMiniAppHomeKeyboard();
-    const sourceChatId = previewMsg?.chat?.id ?? session.previewChatId;
-    const sourceMessageId = previewMsg?.message_id ?? session.previewMessageId;
-    const previewText = previewMsg?.text ?? session.text;
-    const previewEntities = previewMsg?.entities ?? session.entities;
+    let text = previewMsg?.text ?? session.text;
+    let entities = previewMsg?.entities ?? session.entities;
 
-    if (!sourceChatId || !sourceMessageId) {
-        throw new Error('preview message missing — /channel_post را دوباره بزن');
+    if (session.sourceHtml) {
+        const payload = htmlToCaptionPayload(session.sourceHtml);
+        text = payload.caption;
+        entities = payload.caption_entities;
     }
 
-    try {
-        const copied = await telegram.copyMessage(
-            session.channelId,
-            sourceChatId,
-            sourceMessageId,
-            {
-                reply_to_message_id: session.replyToMessageId,
-                reply_markup: markup
-            }
-        );
-        const messageId = typeof copied === 'number' ? copied : copied?.message_id;
-        return {
-            message_id: messageId,
-            entities: previewEntities
-        };
-    } catch (copyErr) {
-        console.warn(
-            'channel_post copyMessage failed:',
-            copyErr instanceof Error ? copyErr.message : copyErr
-        );
-    }
-
-    if (!previewText) {
+    if (!text) {
         throw new Error('preview text missing');
     }
 
-    return sendMessageWithEntities(telegram, session.channelId, previewText, previewEntities, {
+    return sendMessageWithEntities(telegram, session.channelId, text, entities, {
         reply_to_message_id: session.replyToMessageId,
         reply_markup: markup,
         attachMarkupAfterSend: true,
@@ -365,7 +349,9 @@ async function handleChannelPostPublish(ctx) {
 
         const publishedCustomEmoji = countCustomEmoji(sent?.entities);
         const expectedCustomEmoji = countCustomEmoji(
-            previewMsg?.entities ?? session.entities
+            session.sourceHtml
+                ? htmlToCaptionPayload(session.sourceHtml).caption_entities
+                : previewMsg?.entities ?? session.entities
         );
 
         clearSession(adminId);
