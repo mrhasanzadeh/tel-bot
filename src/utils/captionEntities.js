@@ -36,7 +36,7 @@ function decodeHtmlEntities(chunk) {
  */
 function sanitizeEntities(text, entities) {
     const max = utf16Length(text);
-    return (entities || []).filter((ent) => {
+    return normalizeOutboundEntities(entities).filter((ent) => {
         if (!ent || typeof ent !== 'object') return false;
         const offset = Number(ent.offset);
         const length = Number(ent.length);
@@ -49,6 +49,52 @@ function sanitizeEntities(text, entities) {
         }
         return true;
     });
+}
+
+/**
+ * Telegram rejects re-sent entities if they include fields from incoming updates.
+ * @param {object[] | undefined | null} entities
+ * @returns {object[]}
+ */
+function normalizeOutboundEntities(entities) {
+    return (entities || [])
+        .map((ent) => {
+            if (!ent || typeof ent !== 'object') return null;
+            const type = String(ent.type ?? '').trim();
+            const offset = Number(ent.offset);
+            const length = Number(ent.length);
+            if (!type || !Number.isFinite(offset) || !Number.isFinite(length)) return null;
+
+            const base = { type, offset, length };
+            switch (type) {
+                case 'custom_emoji':
+                    return {
+                        ...base,
+                        custom_emoji_id: String(ent.custom_emoji_id ?? '').trim()
+                    };
+                case 'text_link':
+                    return { ...base, url: String(ent.url ?? '').trim() };
+                case 'text_mention': {
+                    const user = ent.user;
+                    if (!user || user.id == null) return null;
+                    return {
+                        ...base,
+                        user: {
+                            id: user.id,
+                            is_bot: Boolean(user.is_bot),
+                            first_name: String(user.first_name ?? 'User')
+                        }
+                    };
+                }
+                case 'pre':
+                    return ent.language
+                        ? { ...base, language: String(ent.language) }
+                        : base;
+                default:
+                    return base;
+            }
+        })
+        .filter(Boolean);
 }
 
 /**
@@ -308,18 +354,43 @@ async function sendMessageWithEntities(
     extra = {}
 ) {
     const allowStripPremium = extra.allowStripPremium !== false;
+    const attachMarkupAfterSend = extra.attachMarkupAfterSend === true;
     const entityOpts = messageEntityOpts(rawText, rawEntities);
-    const { reply_markup, allowStripPremium: _a, ...rest } = extra;
-    const base = {
-        ...(reply_markup ? { reply_markup } : {}),
+    const {
+        reply_markup,
+        allowStripPremium: _a,
+        attachMarkupAfterSend: _b,
         ...rest
+    } = extra;
+    const base = { ...rest };
+    delete base.disable_web_page_preview;
+    delete base.allowStripPremium;
+    delete base.attachMarkupAfterSend;
+
+    const sendOnce = async (entities, withMarkup) => {
+        const payload = {
+            entities,
+            ...base
+        };
+        if (withMarkup && reply_markup) {
+            payload.reply_markup = reply_markup;
+        }
+        return telegram.sendMessage(chatId, entityOpts.text, payload);
     };
 
     try {
-        return await telegram.sendMessage(chatId, entityOpts.text, {
-            entities: entityOpts.entities,
-            ...base
-        });
+        if (attachMarkupAfterSend && reply_markup) {
+            const sent = await sendOnce(entityOpts.entities, false);
+            await telegram.editMessageReplyMarkup(
+                chatId,
+                sent.message_id,
+                undefined,
+                reply_markup
+            );
+            return sent;
+        }
+
+        return await sendOnce(entityOpts.entities, Boolean(reply_markup));
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`sendMessage entities failed: ${msg}; retrying without custom_emoji`);
@@ -333,16 +404,37 @@ async function sendMessageWithEntities(
         const withoutCustom = (entityOpts.entities || []).filter(
             (e) => e.type !== 'custom_emoji'
         );
-        return await telegram.sendMessage(chatId, entityOpts.text, {
-            entities: withoutCustom,
-            ...base
-        });
+        if (attachMarkupAfterSend && reply_markup) {
+            const sent = await sendOnce(withoutCustom, false);
+            await telegram.editMessageReplyMarkup(
+                chatId,
+                sent.message_id,
+                undefined,
+                reply_markup
+            );
+            return sent;
+        }
+        return await sendOnce(withoutCustom, Boolean(reply_markup));
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`sendMessage entities(no custom) failed: ${msg}; trying plain text`);
     }
 
-    return telegram.sendMessage(chatId, entityOpts.text, base);
+    if (attachMarkupAfterSend && reply_markup) {
+        const sent = await telegram.sendMessage(chatId, entityOpts.text, base);
+        await telegram.editMessageReplyMarkup(
+            chatId,
+            sent.message_id,
+            undefined,
+            reply_markup
+        );
+        return sent;
+    }
+
+    return telegram.sendMessage(chatId, entityOpts.text, {
+        ...(reply_markup ? { reply_markup } : {}),
+        ...base
+    });
 }
 
 /**
@@ -421,6 +513,7 @@ module.exports = {
     channelCaptionOpts,
     messageEntityOpts,
     sanitizeEntities,
+    normalizeOutboundEntities,
     countCustomEmoji,
     stripResidualTgEmojiMarkup,
     isBalancedTgEmojiHtml,

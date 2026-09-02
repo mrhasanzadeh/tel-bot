@@ -311,9 +311,13 @@ async function handleChannelPostPublish(ctx) {
             {
                 reply_to_message_id: session.replyToMessageId,
                 reply_markup: buildMiniAppHomeKeyboard(),
-                disable_web_page_preview: true
+                attachMarkupAfterSend: true,
+                allowStripPremium: false
             }
         );
+
+        const publishedCustomEmoji = countCustomEmoji(sent?.entities);
+        const expectedCustomEmoji = countCustomEmoji(session.entities);
 
         clearSession(adminId);
 
@@ -322,7 +326,10 @@ async function handleChannelPostPublish(ctx) {
             session.channelId;
         await ctx.reply(
             `${e('success')} ریپلای ارسال شد در <b>${escapeHtml(label)}</b>.\n` +
-                `message_id: <code>${escapeHtml(String(sent.message_id))}</code>`,
+                `message_id: <code>${escapeHtml(String(sent.message_id))}</code>` +
+                (expectedCustomEmoji > 0 && publishedCustomEmoji < expectedCustomEmoji
+                    ? `\n${e('warning')} اموجی پرمیوم در کانال ${publishedCustomEmoji}/${expectedCustomEmoji} — لاگ سرور را چک کن.`
+                    : ''),
             htmlOpts()
         );
     } catch (error) {
