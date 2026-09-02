@@ -438,6 +438,67 @@ async function sendMessageWithEntities(
 }
 
 /**
+ * Send a text message from HTML caption markup (tg-emoji, bold, links).
+ * Channel posts preserve premium emoji reliably via parse_mode HTML, not entities.
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string|number} chatId
+ * @param {string} html
+ * @param {object} [extra]
+ */
+async function sendMessageWithHtml(telegram, chatId, html, extra = {}) {
+    const allowStripPremium = extra.allowStripPremium !== false;
+    const attachMarkupAfterSend = extra.attachMarkupAfterSend === true;
+    const htmlText = String(html ?? '').slice(0, MESSAGE_TEXT_MAX);
+    const {
+        reply_markup,
+        allowStripPremium: _a,
+        attachMarkupAfterSend: _b,
+        ...rest
+    } = extra;
+    const base = {
+        ...rest,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    };
+    delete base.allowStripPremium;
+    delete base.attachMarkupAfterSend;
+
+    const attachMarkup = async (sent) => {
+        if (attachMarkupAfterSend && reply_markup && sent?.message_id != null) {
+            await telegram.editMessageReplyMarkup(
+                chatId,
+                sent.message_id,
+                undefined,
+                reply_markup
+            );
+        }
+        return sent;
+    };
+
+    try {
+        console.warn(
+            `sendMessage HTML: chat=${chatId} len=${htmlText.length} tg_emoji=${(
+                htmlText.match(/<tg-emoji\b/gi) || []
+            ).length}`
+        );
+        return await attachMarkup(await telegram.sendMessage(chatId, htmlText, base));
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`sendMessage HTML failed: ${msg}; trying parsed entities`);
+        if (!allowStripPremium) {
+            throw err instanceof Error ? err : new Error(msg);
+        }
+    }
+
+    const payload = htmlToCaptionPayload(htmlText);
+    return sendMessageWithEntities(telegram, chatId, payload.caption, payload.caption_entities, {
+        ...extra,
+        attachMarkupAfterSend,
+        allowStripPremium
+    });
+}
+
+/**
  * Send photo with caption.
  * @param {import('telegraf').Telegram} telegram
  * @param {string|number} chatId
@@ -519,6 +580,7 @@ module.exports = {
     isBalancedTgEmojiHtml,
     sendPhotoWithHtmlCaption,
     sendMessageWithEntities,
+    sendMessageWithHtml,
     PHOTO_CAPTION_MAX,
     MESSAGE_TEXT_MAX
 };

@@ -3,8 +3,11 @@ const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
 const {
     countCustomEmoji,
     htmlToCaptionPayload,
+    isBalancedTgEmojiHtml,
     messageEntityOpts,
-    sendMessageWithEntities
+    sendMessageWithEntities,
+    sendMessageWithHtml,
+    MESSAGE_TEXT_MAX
 } = require('../utils/captionEntities');
 const { buildMiniAppHomeKeyboard } = require('../utils/miniAppLinks');
 const {
@@ -265,16 +268,27 @@ async function handleChannelPostText(ctx) {
 
     await ctx.reply(previewHeader, htmlOpts());
 
-    const bodyMsg = await ctx.telegram.sendMessage(
-        ctx.chat.id,
-        fresh.text,
-        fresh.entities?.length
-            ? {
-                  entities: fresh.entities,
+    const useHtmlPreview =
+        fresh.sourceHtml && isBalancedTgEmojiHtml(fresh.sourceHtml);
+    const bodyMsg = useHtmlPreview
+        ? await ctx.telegram.sendMessage(
+              ctx.chat.id,
+              fresh.sourceHtml.slice(0, MESSAGE_TEXT_MAX),
+              {
+                  parse_mode: 'HTML',
                   reply_markup: buildPreviewKeyboard()
               }
-            : { reply_markup: buildPreviewKeyboard() }
-    );
+          )
+        : await ctx.telegram.sendMessage(
+              ctx.chat.id,
+              fresh.text,
+              fresh.entities?.length
+                  ? {
+                        entities: fresh.entities,
+                        reply_markup: buildPreviewKeyboard()
+                    }
+                  : { reply_markup: buildPreviewKeyboard() }
+          );
 
     touchSession(adminId, {
         previewChatId: String(ctx.chat.id),
@@ -292,25 +306,31 @@ async function handleChannelPostText(ctx) {
  */
 async function publishChannelPostFromPreview(telegram, session, previewMsg) {
     const markup = buildMiniAppHomeKeyboard();
-    let text = previewMsg?.text ?? session.text;
-    let entities = previewMsg?.entities ?? session.entities;
+    const extra = {
+        reply_to_message_id: session.replyToMessageId,
+        reply_markup: markup,
+        attachMarkupAfterSend: true,
+        allowStripPremium: false
+    };
 
-    if (session.sourceHtml) {
-        const payload = htmlToCaptionPayload(session.sourceHtml);
-        text = payload.caption;
-        entities = payload.caption_entities;
+    if (session.sourceHtml && isBalancedTgEmojiHtml(session.sourceHtml)) {
+        console.warn(
+            `channel_post publish: HTML path channel=${session.channelId} reply_to=${session.replyToMessageId}`
+        );
+        return sendMessageWithHtml(telegram, session.channelId, session.sourceHtml, extra);
     }
+
+    const text = previewMsg?.text ?? session.text;
+    const entities = previewMsg?.entities ?? session.entities;
+    console.warn(
+        `channel_post publish: entities path channel=${session.channelId} custom=${countCustomEmoji(entities)}`
+    );
 
     if (!text) {
         throw new Error('preview text missing');
     }
 
-    return sendMessageWithEntities(telegram, session.channelId, text, entities, {
-        reply_to_message_id: session.replyToMessageId,
-        reply_markup: markup,
-        attachMarkupAfterSend: true,
-        allowStripPremium: false
-    });
+    return sendMessageWithEntities(telegram, session.channelId, text, entities, extra);
 }
 
 /**
@@ -347,12 +367,11 @@ async function handleChannelPostPublish(ctx) {
             previewMsg
         );
 
+        const expectedCustomEmoji = session.sourceHtml
+            ? countCustomEmoji(htmlToCaptionPayload(session.sourceHtml).caption_entities)
+            : countCustomEmoji(previewMsg?.entities ?? session.entities);
+
         const publishedCustomEmoji = countCustomEmoji(sent?.entities);
-        const expectedCustomEmoji = countCustomEmoji(
-            session.sourceHtml
-                ? htmlToCaptionPayload(session.sourceHtml).caption_entities
-                : previewMsg?.entities ?? session.entities
-        );
 
         clearSession(adminId);
 
@@ -363,7 +382,7 @@ async function handleChannelPostPublish(ctx) {
             `${e('success')} ریپلای ارسال شد در <b>${escapeHtml(label)}</b>.\n` +
                 `message_id: <code>${escapeHtml(String(sent.message_id))}</code>` +
                 (expectedCustomEmoji > 0 && publishedCustomEmoji < expectedCustomEmoji
-                    ? `\n${e('warning')} اموجی پرمیوم در کانال ${publishedCustomEmoji}/${expectedCustomEmoji} — لاگ سرور را چک کن.`
+                    ? `\n${e('warning')} اموجی پرمیوم در پاسخ API: ${publishedCustomEmoji}/${expectedCustomEmoji} — اگر در کانال درست است نادیده بگیر.`
                     : ''),
             htmlOpts()
         );
