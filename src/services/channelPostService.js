@@ -21,6 +21,8 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
  *   replyToMessageId: number,
  *   text?: string,
  *   entities?: object[],
+ *   previewChatId?: string,
+ *   previewMessageId?: number,
  *   expiresAt: number
  * }} ChannelPostSession */
 
@@ -165,8 +167,8 @@ async function handleChannelPostCommand(ctx) {
     await ctx.reply(
         `${e('megaphone')} <b>ارسال ریپلای کانال + دکمه مینی‌اپ</b>\n\n` +
             `۱) پست کانال (مثلاً همان عکس) را اینجا <b>فوروارد</b> کن\n` +
-            `۲) متن رونمایی را بفرست (اموجی پرمیوم از کیبورد تلگرام یا HTML <tg-emoji>)\n` +
-            `۳) کانال مقصد را از دکمه‌ها انتخاب کن\n\n` +
+            `۲) متن رونمایی را بفرست (اموجی پرمیوم را همان‌جا از picker تلگرام بگذار)\n` +
+            `۳) پیش‌نمایش را تأیید کن\n\n` +
             `یا مستقیم:\n` +
             `<code>/channel_post CHAT_ID MESSAGE_ID</code>\n` +
             `لغو: <code>/channel_post cancel</code>`,
@@ -254,26 +256,77 @@ async function handleChannelPostText(ctx) {
         `reply_to: <code>${escapeHtml(String(fresh.replyToMessageId))}</code>` +
         (premiumCount > 0
             ? `\n${e('cool')} ${premiumCount} اموجی پرمیوم حفظ می‌شود.`
-            : '') +
-        '\n\n';
+            : '');
 
-    const previewOpts = {
-        reply_markup: buildPreviewKeyboard()
-    };
+    await ctx.reply(previewHeader, htmlOpts());
 
-    if (fresh.entities?.length) {
-        await ctx.reply(previewHeader.replace(/\n\n$/, ''), htmlOpts());
-        await ctx.telegram.sendMessage(ctx.chat.id, fresh.text, {
-            entities: fresh.entities,
-            ...previewOpts
-        });
-    } else {
-        await ctx.reply(`${previewHeader}${escapeHtml(fresh.text)}`, {
-            ...htmlOpts(),
-            ...previewOpts
-        });
-    }
+    const bodyMsg = await ctx.telegram.sendMessage(
+        ctx.chat.id,
+        fresh.text,
+        fresh.entities?.length
+            ? {
+                  entities: fresh.entities,
+                  reply_markup: buildPreviewKeyboard()
+              }
+            : { reply_markup: buildPreviewKeyboard() }
+    );
+
+    touchSession(adminId, {
+        previewChatId: String(ctx.chat.id),
+        previewMessageId: bodyMsg.message_id
+    });
     return true;
+}
+
+/**
+ * Publish by copying the validated preview message (preserves premium emoji entities).
+ * @param {import('telegraf').Telegram} telegram
+ * @param {ChannelPostSession} session
+ * @param {import('telegraf/types').Message | undefined} previewMsg
+ */
+async function publishChannelPostFromPreview(telegram, session, previewMsg) {
+    const markup = buildMiniAppHomeKeyboard();
+    const sourceChatId = previewMsg?.chat?.id ?? session.previewChatId;
+    const sourceMessageId = previewMsg?.message_id ?? session.previewMessageId;
+    const previewText = previewMsg?.text ?? session.text;
+    const previewEntities = previewMsg?.entities ?? session.entities;
+
+    if (!sourceChatId || !sourceMessageId) {
+        throw new Error('preview message missing — /channel_post را دوباره بزن');
+    }
+
+    try {
+        const copied = await telegram.copyMessage(
+            session.channelId,
+            sourceChatId,
+            sourceMessageId,
+            {
+                reply_to_message_id: session.replyToMessageId,
+                reply_markup: markup
+            }
+        );
+        const messageId = typeof copied === 'number' ? copied : copied?.message_id;
+        return {
+            message_id: messageId,
+            entities: previewEntities
+        };
+    } catch (copyErr) {
+        console.warn(
+            'channel_post copyMessage failed:',
+            copyErr instanceof Error ? copyErr.message : copyErr
+        );
+    }
+
+    if (!previewText) {
+        throw new Error('preview text missing');
+    }
+
+    return sendMessageWithEntities(telegram, session.channelId, previewText, previewEntities, {
+        reply_to_message_id: session.replyToMessageId,
+        reply_markup: markup,
+        attachMarkupAfterSend: true,
+        allowStripPremium: false
+    });
 }
 
 /**
@@ -303,21 +356,17 @@ async function handleChannelPostPublish(ctx) {
             /* ignore */
         }
 
-        const sent = await sendMessageWithEntities(
+        const previewMsg = ctx.callbackQuery?.message;
+        const sent = await publishChannelPostFromPreview(
             ctx.telegram,
-            session.channelId,
-            session.text,
-            session.entities,
-            {
-                reply_to_message_id: session.replyToMessageId,
-                reply_markup: buildMiniAppHomeKeyboard(),
-                attachMarkupAfterSend: true,
-                allowStripPremium: false
-            }
+            session,
+            previewMsg
         );
 
         const publishedCustomEmoji = countCustomEmoji(sent?.entities);
-        const expectedCustomEmoji = countCustomEmoji(session.entities);
+        const expectedCustomEmoji = countCustomEmoji(
+            previewMsg?.entities ?? session.entities
+        );
 
         clearSession(adminId);
 
