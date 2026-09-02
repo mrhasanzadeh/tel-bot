@@ -5,6 +5,7 @@ const {
     htmlToCaptionPayload,
     isBalancedTgEmojiHtml,
     messageEntityOpts,
+    messageToHtml,
     sendMessageWithEntities,
     sendMessageWithHtml,
     MESSAGE_TEXT_MAX
@@ -313,17 +314,30 @@ async function publishChannelPostFromPreview(telegram, session, previewMsg) {
         allowStripPremium: false
     };
 
-    if (session.sourceHtml && isBalancedTgEmojiHtml(session.sourceHtml)) {
-        console.warn(
-            `channel_post publish: HTML path channel=${session.channelId} reply_to=${session.replyToMessageId}`
-        );
-        return sendMessageWithHtml(telegram, session.channelId, session.sourceHtml, extra);
-    }
-
     const text = previewMsg?.text ?? session.text;
     const entities = previewMsg?.entities ?? session.entities;
+    const customCount = countCustomEmoji(entities);
+
+    let html =
+        session.sourceHtml && isBalancedTgEmojiHtml(session.sourceHtml)
+            ? session.sourceHtml
+            : null;
+    let htmlSource = html ? 'paste' : null;
+
+    if (!html && customCount > 0 && text) {
+        html = messageToHtml(text, entities);
+        htmlSource = 'entities';
+    }
+
+    if (html && countCustomEmoji(htmlToCaptionPayload(html).caption_entities) > 0) {
+        console.warn(
+            `channel_post publish: HTML path (${htmlSource}) channel=${session.channelId} custom=${customCount}`
+        );
+        return sendMessageWithHtml(telegram, session.channelId, html, extra);
+    }
+
     console.warn(
-        `channel_post publish: entities path channel=${session.channelId} custom=${countCustomEmoji(entities)}`
+        `channel_post publish: plain path channel=${session.channelId} custom=${customCount}`
     );
 
     if (!text) {

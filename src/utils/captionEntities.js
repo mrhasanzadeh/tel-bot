@@ -28,6 +28,68 @@ function decodeHtmlEntities(chunk) {
         .replace(/&#39;/g, "'");
 }
 
+/** @param {string} text */
+function escapeHtmlLite(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/**
+ * Rebuild tg-emoji HTML from a Telegram message body + entities (picker / forwarded text).
+ * @param {string} text
+ * @param {object[] | undefined | null} entities
+ * @returns {string}
+ */
+function messageToHtml(text, entities) {
+    const raw = String(text ?? '');
+    const ents = normalizeOutboundEntities(entities)
+        .filter((ent) => {
+            const offset = Number(ent.offset);
+            const length = Number(ent.length);
+            return offset >= 0 && length > 0 && offset + length <= utf16Length(raw);
+        })
+        .sort((a, b) => a.offset - b.offset || a.length - b.length);
+
+    let html = '';
+    let cursor = 0;
+    for (const ent of ents) {
+        if (ent.offset < cursor) continue;
+        html += escapeHtmlLite(raw.slice(cursor, ent.offset));
+        const inner = raw.slice(ent.offset, ent.offset + ent.length);
+        const esc = escapeHtmlLite(inner);
+        switch (ent.type) {
+            case 'custom_emoji':
+                html += `<tg-emoji emoji-id="${String(ent.custom_emoji_id ?? '').trim()}">${esc}</tg-emoji>`;
+                break;
+            case 'bold':
+                html += `<b>${esc}</b>`;
+                break;
+            case 'italic':
+                html += `<i>${esc}</i>`;
+                break;
+            case 'underline':
+                html += `<u>${esc}</u>`;
+                break;
+            case 'strikethrough':
+                html += `<s>${esc}</s>`;
+                break;
+            case 'text_link':
+                html += `<a href="${escapeHtmlLite(String(ent.url ?? ''))}">${esc}</a>`;
+                break;
+            case 'code':
+                html += `<code>${esc}</code>`;
+                break;
+            default:
+                html += esc;
+        }
+        cursor = ent.offset + ent.length;
+    }
+    html += escapeHtmlLite(raw.slice(cursor));
+    return html;
+}
+
 /**
  * Drop entities Telegram would reject (ENTITY_TEXT_INVALID).
  * @param {string} text
@@ -578,6 +640,7 @@ module.exports = {
     countCustomEmoji,
     stripResidualTgEmojiMarkup,
     isBalancedTgEmojiHtml,
+    messageToHtml,
     sendPhotoWithHtmlCaption,
     sendMessageWithEntities,
     sendMessageWithHtml,
