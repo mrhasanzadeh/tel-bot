@@ -212,6 +212,28 @@ function htmlToCaptionPayload(html) {
 }
 
 /**
+ * Drop leftover tg-emoji markup when HTML was truncated or malformed.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripResidualTgEmojiMarkup(text) {
+    return String(text ?? '')
+        .replace(/<tg-emoji\b[^>]*>/gi, '')
+        .replace(/<\/tg-emoji>/gi, '');
+}
+
+/**
+ * @param {string} html
+ * @returns {boolean}
+ */
+function isBalancedTgEmojiHtml(html) {
+    const src = String(html ?? '');
+    const opens = (src.match(/<tg-emoji\b/gi) || []).length;
+    const closes = (src.match(/<\/tg-emoji>/gi) || []).length;
+    return opens > 0 && opens === closes;
+}
+
+/**
  * Options for sendPhoto / editMessageCaption (premium emoji via caption_entities).
  * @param {string} htmlCaption
  * @param {{ maxLen?: number | null }} [opts]
@@ -240,21 +262,30 @@ function channelCaptionOpts(htmlCaption, opts = {}) {
 function messageEntityOpts(rawText, rawEntities, opts = {}) {
     const maxLen = opts.maxLen == null ? MESSAGE_TEXT_MAX : opts.maxLen;
     const text = String(rawText ?? '');
+    const fromClient = sanitizeEntities(text, rawEntities ?? []);
+    const hasClientCustomEmoji = fromClient.some((ent) => ent.type === 'custom_emoji');
 
-    if (/<tg-emoji\b/i.test(text)) {
-        const payload = htmlToCaptionPayload(text);
-        const truncated = truncateCaption(
-            payload.caption,
-            payload.caption_entities,
-            maxLen
-        );
+    // Prefer live Telegram entities (picker) over re-parsing HTML in the same message.
+    if (hasClientCustomEmoji && !/<tg-emoji\b/i.test(text)) {
+        const truncated = truncateCaption(text, fromClient, maxLen);
         return {
             text: truncated.caption,
             entities: truncated.caption_entities
         };
     }
 
-    const truncated = truncateCaption(text, rawEntities ?? [], maxLen);
+    if (/<tg-emoji\b/i.test(text)) {
+        const payload = htmlToCaptionPayload(text);
+        let cleanText = stripResidualTgEmojiMarkup(payload.caption);
+        let entities = sanitizeEntities(cleanText, payload.caption_entities);
+        const truncated = truncateCaption(cleanText, entities, maxLen);
+        return {
+            text: truncated.caption,
+            entities: truncated.caption_entities
+        };
+    }
+
+    const truncated = truncateCaption(text, fromClient, maxLen);
     return {
         text: truncated.caption,
         entities: truncated.caption_entities
@@ -291,27 +322,7 @@ async function sendMessageWithEntities(
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendMessage entities failed: ${msg}; trying HTML tg-emoji`);
-    }
-
-    if (/<tg-emoji\b/i.test(String(rawText ?? ''))) {
-        try {
-            return await telegram.sendMessage(
-                chatId,
-                String(rawText ?? '').slice(0, MESSAGE_TEXT_MAX),
-                {
-                    parse_mode: 'HTML',
-                    ...base
-                }
-            );
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(
-                `sendMessage HTML(tg-emoji) failed: ${msg}` +
-                    (allowStripPremium ? '; retry without custom_emoji' : '')
-            );
-            if (!allowStripPremium) throw err instanceof Error ? err : new Error(msg);
-        }
+        console.warn(`sendMessage entities failed: ${msg}; retrying without custom_emoji`);
     }
 
     if (!allowStripPremium) {
@@ -411,6 +422,8 @@ module.exports = {
     messageEntityOpts,
     sanitizeEntities,
     countCustomEmoji,
+    stripResidualTgEmojiMarkup,
+    isBalancedTgEmojiHtml,
     sendPhotoWithHtmlCaption,
     sendMessageWithEntities,
     PHOTO_CAPTION_MAX,
