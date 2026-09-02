@@ -112,6 +112,34 @@ function buildPreviewKeyboard() {
     };
 }
 
+/** Telegram Bot API: custom_emoji in channels needs Fragment username on the bot. */
+const CHANNEL_PREMIUM_EMOJI_NOTE =
+    `${e('warning')} <b>اموجی پرمیوم در کانال</b>\n` +
+    `طبق API تلگرام، bot فقط در چت خصوصی/گروه می‌تواند اموجی پرمیوم بفرستد؛ ` +
+    `در <b>کانال</b> معمولاً به یونیکد (📣) تبدیل می‌شود.\n\n` +
+    `<b>راه‌حل‌ها:</b>\n` +
+    `• username از Fragment روی bot (حدود ۵۰۰۰ TON)\n` +
+    `• متن را خودت در کانال ریپلای کن، بعد:\n` +
+    `<code>/channel_post button CHAT_ID MESSAGE_ID</code>`;
+
+/**
+ * Send only the mini-app button as a reply under a channel post (no text body from bot).
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string} channelId
+ * @param {number} replyToMessageId
+ */
+async function publishChannelButtonOnly(telegram, channelId, replyToMessageId) {
+    const markup = buildMiniAppHomeKeyboard();
+    console.warn(
+        `channel_post publish: button-only channel=${channelId} reply_to=${replyToMessageId}`
+    );
+    return telegram.sendMessage(channelId, '⬇️', {
+        reply_to_message_id: replyToMessageId,
+        reply_markup: markup,
+        disable_web_page_preview: true
+    });
+}
+
 /**
  * @param {import('telegraf').Context} ctx
  */
@@ -131,6 +159,46 @@ async function handleChannelPostCommand(ctx) {
     if (sub === 'cancel' || sub === 'لغو') {
         clearSession(adminId);
         await ctx.reply(`${e('stop')} ارسال کانال لغو شد.`, htmlOpts());
+        return;
+    }
+
+    if (sub === 'button' || sub === 'دکمه') {
+        const session = getSession(adminId);
+        const channelId = normalizeChatId(parts[2]) || session?.channelId || '';
+        const replyToMessageId = Number(parts[3]) || session?.replyToMessageId || 0;
+
+        if (!channelId || !Number.isFinite(replyToMessageId) || replyToMessageId <= 0) {
+            await ctx.reply(
+                `${e('warning')} فقط دکمه مینی‌اپ (بدون متن bot):\n` +
+                    `<code>/channel_post button -1001234567890 42</code>\n` +
+                    `یا پست را فوروارد کن و دوباره <code>/channel_post button</code> بزن.`,
+                htmlOpts()
+            );
+            return;
+        }
+
+        try {
+            const sent = await publishChannelButtonOnly(
+                ctx.telegram,
+                channelId,
+                replyToMessageId
+            );
+            clearSession(adminId);
+            const label =
+                getChannelPostTargets().find((row) => row.id === channelId)?.label || channelId;
+            await ctx.reply(
+                `${e('success')} دکمه مینی‌اپ زیر پست در <b>${escapeHtml(label)}</b> ارسال شد.\n` +
+                    `message_id: <code>${escapeHtml(String(sent.message_id))}</code>`,
+                htmlOpts()
+            );
+        } catch (error) {
+            console.error('channel_post button error:', error);
+            await ctx.reply(
+                `${e('error')} خطا: ${escapeHtml(error.message)}\n\n` +
+                    `${e('info')} bot باید در کانال ادمین باشد (Post messages).`,
+                htmlOpts()
+            );
+        }
         return;
     }
 
@@ -175,6 +243,8 @@ async function handleChannelPostCommand(ctx) {
             `۱) پست کانال (مثلاً همان عکس) را اینجا <b>فوروارد</b> کن\n` +
             `۲) متن رونمایی را بفرست (اموجی پرمیوم را همان‌جا از picker تلگرام بگذار)\n` +
             `۳) پیش‌نمایش را تأیید کن\n\n` +
+            `اگر اموجی پرمیوم در کانال لازم است، متن را خودت ریپلای کن و بعد:\n` +
+            `<code>/channel_post button CHAT_ID MESSAGE_ID</code>\n\n` +
             `یا مستقیم:\n` +
             `<code>/channel_post CHAT_ID MESSAGE_ID</code>\n` +
             `لغو: <code>/channel_post cancel</code>`,
@@ -268,6 +338,10 @@ async function handleChannelPostText(ctx) {
             : '');
 
     await ctx.reply(previewHeader, htmlOpts());
+
+    if (premiumCount > 0) {
+        await ctx.reply(CHANNEL_PREMIUM_EMOJI_NOTE, htmlOpts());
+    }
 
     const useHtmlPreview =
         fresh.sourceHtml && isBalancedTgEmojiHtml(fresh.sourceHtml);
@@ -392,11 +466,15 @@ async function handleChannelPostPublish(ctx) {
         const label =
             getChannelPostTargets().find((row) => row.id === session.channelId)?.label ||
             session.channelId;
+        const premiumStripped =
+            expectedCustomEmoji > 0 && publishedCustomEmoji < expectedCustomEmoji;
+
         await ctx.reply(
             `${e('success')} ریپلای ارسال شد در <b>${escapeHtml(label)}</b>.\n` +
                 `message_id: <code>${escapeHtml(String(sent.message_id))}</code>` +
-                (expectedCustomEmoji > 0 && publishedCustomEmoji < expectedCustomEmoji
-                    ? `\n${e('warning')} اموجی پرمیوم در پاسخ API: ${publishedCustomEmoji}/${expectedCustomEmoji} — اگر در کانال درست است نادیده بگیر.`
+                (premiumStripped
+                    ? `\n\n${CHANNEL_PREMIUM_EMOJI_NOTE}\n` +
+                          `${e('info')} API: ${publishedCustomEmoji}/${expectedCustomEmoji} custom_emoji`
                     : ''),
             htmlOpts()
         );
@@ -435,5 +513,6 @@ module.exports = {
     handleChannelPostForward,
     handleChannelPostText,
     handleChannelPostPublish,
-    handleChannelPostCancel
+    handleChannelPostCancel,
+    publishChannelButtonOnly
 };

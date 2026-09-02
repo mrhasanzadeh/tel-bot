@@ -59,6 +59,8 @@ Schedule module is **disabled** when `SHIORI_API_URL` is set (requires direct Po
 
 See `.env.example`. Defaults in `src/config/premiumEmojiDefaults.js`.
 
+**Channel posts:** Telegram Bot API only renders custom emoji in channels when the bot has an upgraded Fragment username (~5000 TON). With owner Premium alone, custom emoji works in private/group/supergroup previews but is stripped on channel publish. Workaround: post the reply text manually from your Premium account, then `/channel_post button CHAT_ID MESSAGE_ID` for the mini-app button.
+
 ## Docker
 
 ```bash
@@ -87,6 +89,7 @@ docker compose up -d
 - `/bind_channel_post` — fallback: reply to a forwarded channel post; bot searches the catalog and lets you pick the anime (optional query: `/bind_channel_post dandadan`)
 - `/flush_channel_drafts` — immediately deliver queued channel post previews
 - `/channel_post` — reply under a channel post with mini-app button (forward target post → send text with premium emoji → confirm)
+- `/channel_post button [CHAT_ID MESSAGE_ID]` — mini-app button only (use after you posted premium-emoji text manually in the channel)
 - `/channel_post cancel` — abort an in-progress `/channel_post` session
 - `/clear_channel_drafts` — reject all pending drafts still waiting for preview (clear stuck queue)
 

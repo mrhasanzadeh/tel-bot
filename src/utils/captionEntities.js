@@ -501,7 +501,7 @@ async function sendMessageWithEntities(
 
 /**
  * Send a text message from HTML caption markup (tg-emoji, bold, links).
- * Channel posts preserve premium emoji reliably via parse_mode HTML, not entities.
+ * Note: Telegram strips custom_emoji in channel posts unless the bot has a Fragment username.
  * @param {import('telegraf').Telegram} telegram
  * @param {string|number} chatId
  * @param {string} html
