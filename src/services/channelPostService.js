@@ -1,5 +1,10 @@
 const config = require('../../config');
 const { e, htmlOpts, escapeHtml } = require('../utils/premiumEmoji');
+const {
+    countCustomEmoji,
+    messageEntityOpts,
+    sendMessageWithEntities
+} = require('../utils/captionEntities');
 const { buildMiniAppHomeKeyboard } = require('../utils/miniAppLinks');
 const {
     getPublishChannelChoices,
@@ -15,6 +20,7 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
  *   channelId: string,
  *   replyToMessageId: number,
  *   text?: string,
+ *   entities?: object[],
  *   expiresAt: number
  * }} ChannelPostSession */
 
@@ -159,7 +165,7 @@ async function handleChannelPostCommand(ctx) {
     await ctx.reply(
         `${e('megaphone')} <b>ارسال ریپلای کانال + دکمه مینی‌اپ</b>\n\n` +
             `۱) پست کانال (مثلاً همان عکس) را اینجا <b>فوروارد</b> کن\n` +
-            `۲) متن رونمایی را بفرست\n` +
+            `۲) متن رونمایی را بفرست (اموجی پرمیوم از کیبورد تلگرام یا HTML <tg-emoji>)\n` +
             `۳) کانال مقصد را از دکمه‌ها انتخاب کن\n\n` +
             `یا مستقیم:\n` +
             `<code>/channel_post CHAT_ID MESSAGE_ID</code>\n` +
@@ -217,36 +223,56 @@ async function handleChannelPostText(ctx) {
     const session = getSession(adminId);
     if (!session || session.step !== 'text') return false;
 
-    const text = String(ctx.message?.text ?? '').trim();
+    const text = String(ctx.message?.text ?? ctx.message?.caption ?? '').trim();
+    const sourceEntities = ctx.message?.entities ?? ctx.message?.caption_entities ?? [];
     if (!text) {
         await ctx.reply(`${e('warning')} متن خالی است.`, htmlOpts());
         return true;
     }
-    if (text.length > 4096) {
+
+    const payload = messageEntityOpts(text, sourceEntities);
+    if (payload.text.length > 4096) {
         await ctx.reply(`${e('warning')} متن خیلی بلند است (حداکثر ۴۰۹۶ کاراکتر).`, htmlOpts());
         return true;
     }
 
     touchSession(adminId, {
         step: 'confirm',
-        text
+        text: payload.text,
+        entities: payload.entities
     });
 
     const fresh = getSession(adminId);
     const channelLabel =
         getChannelPostTargets().find((row) => row.id === fresh.channelId)?.label ||
         fresh.channelId;
+    const premiumCount = countCustomEmoji(fresh.entities);
 
-    await ctx.reply(
+    const previewHeader =
         `${e('clipboard')} <b>پیش‌نمایش ریپلای</b>\n` +
-            `کانال: <b>${escapeHtml(channelLabel)}</b>\n` +
-            `reply_to: <code>${escapeHtml(String(fresh.replyToMessageId))}</code>\n\n` +
-            `${escapeHtml(text)}`,
-        {
+        `کانال: <b>${escapeHtml(channelLabel)}</b>\n` +
+        `reply_to: <code>${escapeHtml(String(fresh.replyToMessageId))}</code>` +
+        (premiumCount > 0
+            ? `\n${e('cool')} ${premiumCount} اموجی پرمیوم حفظ می‌شود.`
+            : '') +
+        '\n\n';
+
+    const previewOpts = {
+        reply_markup: buildPreviewKeyboard()
+    };
+
+    if (fresh.entities?.length) {
+        await ctx.reply(previewHeader.replace(/\n\n$/, ''), htmlOpts());
+        await ctx.telegram.sendMessage(ctx.chat.id, fresh.text, {
+            entities: fresh.entities,
+            ...previewOpts
+        });
+    } else {
+        await ctx.reply(`${previewHeader}${escapeHtml(fresh.text)}`, {
             ...htmlOpts(),
-            reply_markup: buildPreviewKeyboard()
-        }
-    );
+            ...previewOpts
+        });
+    }
     return true;
 }
 
@@ -277,11 +303,17 @@ async function handleChannelPostPublish(ctx) {
             /* ignore */
         }
 
-        const sent = await ctx.telegram.sendMessage(session.channelId, session.text, {
-            reply_to_message_id: session.replyToMessageId,
-            reply_markup: buildMiniAppHomeKeyboard(),
-            disable_web_page_preview: true
-        });
+        const sent = await sendMessageWithEntities(
+            ctx.telegram,
+            session.channelId,
+            session.text,
+            session.entities,
+            {
+                reply_to_message_id: session.replyToMessageId,
+                reply_markup: buildMiniAppHomeKeyboard(),
+                disable_web_page_preview: true
+            }
+        );
 
         clearSession(adminId);
 

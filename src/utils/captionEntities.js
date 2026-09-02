@@ -4,6 +4,7 @@
  */
 
 const PHOTO_CAPTION_MAX = 1024;
+const MESSAGE_TEXT_MAX = 4096;
 
 /**
  * Telegram entity offset/length are measured in UTF-16 code units — same as JS string.length.
@@ -231,6 +232,109 @@ function channelCaptionOpts(htmlCaption, opts = {}) {
 }
 
 /**
+ * Build sendMessage payload from Telegram message text/entities or HTML tg-emoji markup.
+ * @param {string} rawText
+ * @param {object[] | undefined | null} rawEntities
+ * @param {{ maxLen?: number | null }} [opts]
+ */
+function messageEntityOpts(rawText, rawEntities, opts = {}) {
+    const maxLen = opts.maxLen == null ? MESSAGE_TEXT_MAX : opts.maxLen;
+    const text = String(rawText ?? '');
+
+    if (/<tg-emoji\b/i.test(text)) {
+        const payload = htmlToCaptionPayload(text);
+        const truncated = truncateCaption(
+            payload.caption,
+            payload.caption_entities,
+            maxLen
+        );
+        return {
+            text: truncated.caption,
+            entities: truncated.caption_entities
+        };
+    }
+
+    const truncated = truncateCaption(text, rawEntities ?? [], maxLen);
+    return {
+        text: truncated.caption,
+        entities: truncated.caption_entities
+    };
+}
+
+/**
+ * Send a text message preserving premium emoji via entities (with HTML / plain fallbacks).
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string|number} chatId
+ * @param {string} rawText
+ * @param {object[] | undefined | null} rawEntities
+ * @param {object} [extra]
+ */
+async function sendMessageWithEntities(
+    telegram,
+    chatId,
+    rawText,
+    rawEntities,
+    extra = {}
+) {
+    const allowStripPremium = extra.allowStripPremium !== false;
+    const entityOpts = messageEntityOpts(rawText, rawEntities);
+    const { reply_markup, allowStripPremium: _a, ...rest } = extra;
+    const base = {
+        ...(reply_markup ? { reply_markup } : {}),
+        ...rest
+    };
+
+    try {
+        return await telegram.sendMessage(chatId, entityOpts.text, {
+            entities: entityOpts.entities,
+            ...base
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`sendMessage entities failed: ${msg}; trying HTML tg-emoji`);
+    }
+
+    if (/<tg-emoji\b/i.test(String(rawText ?? ''))) {
+        try {
+            return await telegram.sendMessage(
+                chatId,
+                String(rawText ?? '').slice(0, MESSAGE_TEXT_MAX),
+                {
+                    parse_mode: 'HTML',
+                    ...base
+                }
+            );
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(
+                `sendMessage HTML(tg-emoji) failed: ${msg}` +
+                    (allowStripPremium ? '; retry without custom_emoji' : '')
+            );
+            if (!allowStripPremium) throw err instanceof Error ? err : new Error(msg);
+        }
+    }
+
+    if (!allowStripPremium) {
+        throw new Error('sendMessage failed while preserving premium emoji');
+    }
+
+    try {
+        const withoutCustom = (entityOpts.entities || []).filter(
+            (e) => e.type !== 'custom_emoji'
+        );
+        return await telegram.sendMessage(chatId, entityOpts.text, {
+            entities: withoutCustom,
+            ...base
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`sendMessage entities(no custom) failed: ${msg}; trying plain text`);
+    }
+
+    return telegram.sendMessage(chatId, entityOpts.text, base);
+}
+
+/**
  * Send photo with caption.
  * @param {import('telegraf').Telegram} telegram
  * @param {string|number} chatId
@@ -304,9 +408,12 @@ module.exports = {
     utf16Length,
     htmlToCaptionPayload,
     channelCaptionOpts,
+    messageEntityOpts,
     sanitizeEntities,
     countCustomEmoji,
     sendPhotoWithHtmlCaption,
-    PHOTO_CAPTION_MAX
+    sendMessageWithEntities,
+    PHOTO_CAPTION_MAX,
+    MESSAGE_TEXT_MAX
 };
 

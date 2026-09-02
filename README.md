@@ -86,7 +86,7 @@ docker compose up -d
 - Forward a channel post to the bot DM as admin → inline action menu (bind template, search by name, clear/flush draft queue, channel id)
 - `/bind_channel_post` — fallback: reply to a forwarded channel post; bot searches the catalog and lets you pick the anime (optional query: `/bind_channel_post dandadan`)
 - `/flush_channel_drafts` — immediately deliver queued channel post previews
-- `/channel_post` — reply under a channel post with mini-app button (forward target post → send text → confirm)
+- `/channel_post` — reply under a channel post with mini-app button (forward target post → send text with premium emoji → confirm)
 - `/channel_post cancel` — abort an in-progress `/channel_post` session
 - `/clear_channel_drafts` — reject all pending drafts still waiting for preview (clear stuck queue)
 
