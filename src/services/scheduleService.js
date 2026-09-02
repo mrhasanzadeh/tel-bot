@@ -935,6 +935,7 @@ class ScheduleService {
      * @returns {Promise<boolean>}
      */
     async handleAdminCoverPhoto(ctx) {
+        if (!this.isEnabled()) return false;
         if (!isAdminUserId(ctx.from?.id)) return false;
 
         const fileId = this._extractPhotoFileId(ctx.message);

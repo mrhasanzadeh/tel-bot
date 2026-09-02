@@ -717,7 +717,9 @@ function setupHandlers(bot) {
                 const offered = await offerAdminForwardActions(ctx);
                 if (offered) return;
             }
-            await scheduleService.handleAdminCoverPhoto(ctx);
+            if (scheduleService.isEnabled()) {
+                await scheduleService.handleAdminCoverPhoto(ctx);
+            }
         } catch (error) {
             console.error('❌ Schedule cover photo / admin forward handler:', error);
         }
