@@ -918,7 +918,8 @@ async function deliverPendingChannelDraftPreviews(bot) {
         const fromApi = Array.isArray(item.admin_user_ids)
             ? item.admin_user_ids.map((id) => String(id).trim()).filter(Boolean)
             : [];
-        const targets = [...new Set(fromApi.length ? fromApi : adminIds)];
+        // Union API recipients (env + DB admins) with local ADMIN_USER_ID so neither side can drop peers.
+        const targets = [...new Set([...fromApi, ...adminIds])];
 
         if (!draftId || !cover || !caption || !targets.length) {
             console.warn(
