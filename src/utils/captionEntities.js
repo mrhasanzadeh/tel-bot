@@ -588,12 +588,14 @@ async function sendPhotoWithHtmlCaption(telegram, chatId, photo, htmlCaption, ex
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`sendPhoto entities failed: ${msg}; trying HTML tg-emoji`);
+        console.warn(`sendPhoto entities failed: ${msg}; trying HTML parse_mode on repaired caption`);
     }
 
+    // Never slice raw HTML mid-tag — rebuild from the already-truncated entity payload.
     try {
+        const safeHtml = messageToHtml(entityOpts.caption, entityOpts.caption_entities);
         return await telegram.sendPhoto(chatId, photo, {
-            caption: String(htmlCaption ?? '').slice(0, PHOTO_CAPTION_MAX),
+            caption: safeHtml.slice(0, PHOTO_CAPTION_MAX),
             parse_mode: 'HTML',
             ...base
         });
