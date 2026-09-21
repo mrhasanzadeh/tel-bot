@@ -18,6 +18,12 @@ module.exports = {
         process.env.TELEGRAM_MINI_APP_BOT_USERNAME ||
         process.env.MINI_APP_BOT_USERNAME ||
         'ShioriMiniBot',
+    /**
+     * Token for Mini App bot DMs (episode notifications).
+     * Falls back to BOT_TOKEN when unset — prefer a dedicated ShioriMiniBot token.
+     */
+    TELEGRAM_MINI_APP_BOT_TOKEN:
+        process.env.TELEGRAM_MINI_APP_BOT_TOKEN || process.env.BOT_TOKEN || null,
     /** File-delivery / upload bot username (no @). */
     TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME || 'ShioriUploadBot',
     SHIORI_API_URL: process.env.SHIORI_API_URL,

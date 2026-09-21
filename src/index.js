@@ -12,6 +12,7 @@ const { runStartupSecurityChecks } = require('./services/botSecurity');
 const scheduleService = require('./services/scheduleService');
 const archiveMirrorService = require('./services/archiveMirrorService');
 const { startChannelDraftPreviewPoller } = require('./services/channelDraftService');
+const { startTelegramDmPoller } = require('./services/telegramDmOutboxService');
 
 // Disable SSL verification for development
 if (process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_TLS === '1') {
@@ -75,6 +76,7 @@ async function start() {
     // Telegraf's bot.launch() Promise resolves only when the bot *stops*.
     // Start background jobs before awaiting launch, otherwise they never run.
     startChannelDraftPreviewPoller(bot);
+    startTelegramDmPoller();
     console.log('✅ Bot started successfully');
 
     await bot.launch({
