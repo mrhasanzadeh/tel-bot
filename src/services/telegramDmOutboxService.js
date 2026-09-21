@@ -112,15 +112,25 @@ async function deliverPendingTelegramDms(limit = 40) {
     for (const item of items) {
         const id = String(item?.id ?? '').trim();
         const chatId = Number(item?.chat_id);
-        if (!id || !Number.isFinite(chatId)) {
-            if (id) results.push({ id, ok: false, error: 'invalid payload' });
+        const text = String(item?.text ?? '').trim();
+        if (!id) continue;
+
+        if (!Number.isFinite(chatId) || chatId <= 0 || !text) {
+            console.warn(
+                `📬 skip invalid outbox id=${id} chat=${item?.chat_id} textLen=${text.length}`
+            );
+            results.push({
+                id,
+                ok: false,
+                error: `invalid payload chat=${item?.chat_id} textLen=${text.length}`,
+            });
             continue;
         }
 
         try {
             const sent = await sendOneDm({
                 chat_id: chatId,
-                text: String(item.text ?? ''),
+                text,
                 web_app_url: item.web_app_url ?? null,
             });
             results.push(
