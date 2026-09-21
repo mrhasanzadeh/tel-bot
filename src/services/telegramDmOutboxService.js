@@ -47,10 +47,13 @@ async function sendOneDm(item) {
     if (webAppUrl) {
         payload.reply_markup = {
             inline_keyboard: [
-                [{ text: 'مشاهده در شیوری', web_app: { url: webAppUrl } }],
+                [{ text: 'مشاهده در مینی‌اپ', web_app: { url: webAppUrl } }],
             ],
         };
     }
+
+    // Episode DMs use HTML (<b>, <tg-emoji>); plain broadcasts stay fine with HTML too.
+    payload.parse_mode = 'HTML';
 
     let json = await callTelegram(token, 'sendMessage', payload);
     if (json.ok) return { ok: true };
@@ -60,6 +63,7 @@ async function sendOneDm(item) {
         const retry = await callTelegram(token, 'sendMessage', {
             chat_id: item.chat_id,
             text: item.text,
+            parse_mode: 'HTML',
             disable_web_page_preview: true,
         });
         if (retry.ok) {
