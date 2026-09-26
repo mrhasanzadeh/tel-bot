@@ -42,6 +42,15 @@ const {
     handleChannelPostPublish,
     handleChannelPostCancel
 } = require('../services/channelPostService');
+const {
+    handleCustomPostCommand,
+    handleCustomPostPhoto,
+    handleCustomPostText,
+    handleCustomPostDestination,
+    handleCustomPostLabelDefault,
+    handleCustomPostPublish,
+    handleCustomPostCancel
+} = require('../services/customChannelPostService');
 
 // Store pending links for non-member users
 const pendingLinks = new Map();
@@ -352,12 +361,53 @@ function setupHandlers(bot) {
         }
     });
 
+    bot.command('custom_post', async (ctx) => {
+        if (ctx.chat?.type !== 'private') return;
+        try {
+            await handleCustomPostCommand(ctx);
+        } catch (error) {
+            console.error('custom_post error:', error);
+            await botReply.reply(ctx, `${e('error')} خطا: ${error.message}`);
+        }
+    });
+
     bot.action('cpost_send', async (ctx) => {
         await handleChannelPostPublish(ctx);
     });
 
     bot.action('cpost_cancel', async (ctx) => {
         await handleChannelPostCancel(ctx);
+    });
+
+    bot.action(/^cpost2_dest_(.+)$/, async (ctx) => {
+        try {
+            await handleCustomPostDestination(ctx);
+        } catch (error) {
+            console.error('custom_post dest error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    bot.action('cpost2_label_default', async (ctx) => {
+        try {
+            await handleCustomPostLabelDefault(ctx);
+        } catch (error) {
+            console.error('custom_post label error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    bot.action(/^cpost2_pub_(\d+)$/, async (ctx) => {
+        try {
+            await handleCustomPostPublish(ctx);
+        } catch (error) {
+            console.error('custom_post publish error:', error);
+            await ctx.answerCbQuery('خطا', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    bot.action('cpost2_cancel', async (ctx) => {
+        await handleCustomPostCancel(ctx);
     });
 
     // bp:{bindId}:{animeUuid} — pick anime for channel template bind
@@ -711,6 +761,9 @@ function setupHandlers(bot) {
             if (isMonitoredChannelChat(ctx)) return;
             if (!isAdminUserId(ctx.from?.id)) return;
             if (ctx.chat?.type === 'private') {
+                const handledCustomPhoto = await handleCustomPostPhoto(ctx);
+                if (handledCustomPhoto) return;
+
                 const handledChannelPost = await handleChannelPostForward(ctx);
                 if (handledChannelPost) return;
 
@@ -750,6 +803,9 @@ function setupHandlers(bot) {
             if (rawText.startsWith('/')) return;
 
             if (isAdminUserId(ctx.from.id)) {
+                const handledCustomPostText = await handleCustomPostText(ctx);
+                if (handledCustomPostText) return;
+
                 const handledChannelPostText = await handleChannelPostText(ctx);
                 if (handledChannelPostText) return;
 
