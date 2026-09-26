@@ -54,7 +54,7 @@ const DESTINATIONS = [
         key: 'schedule',
         label: 'برنامه پخش',
         startapp: 'schedule',
-        defaultButton: 'برنامه پخش'
+        defaultButton: 'برنامه پخش هفتگی'
     },
     {
         key: 'subscribe',
@@ -204,6 +204,13 @@ async function handleCustomPostCommand(ctx) {
         clearSession(adminId);
         await ctx.reply(`${e('stop')} پست کاستوم لغو شد.`, htmlOpts());
         return;
+    }
+
+    // Avoid /channel_post "forward target" session swallowing button-label text.
+    try {
+        require('./channelPostService').clearSession(adminId);
+    } catch {
+        /* ignore */
     }
 
     touchSession(adminId, {

@@ -162,6 +162,12 @@ async function handleChannelPostCommand(ctx) {
         return;
     }
 
+    try {
+        require('./customChannelPostService').clearSession(adminId);
+    } catch {
+        /* ignore */
+    }
+
     if (sub === 'button' || sub === 'دکمه') {
         const session = getSession(adminId);
         const channelId = normalizeChatId(parts[2]) || session?.channelId || '';
@@ -264,7 +270,17 @@ async function handleChannelPostForward(ctx) {
     const session = getSession(adminId);
     if (!session || session.step !== 'target') return false;
 
-    const target = extractChannelReplyTarget(ctx.message);
+    // Do not swallow plain text (e.g. /custom_post button label).
+    const message = ctx.message;
+    const looksLikeForward = Boolean(
+        message?.forward_from_chat ||
+            message?.forward_origin ||
+            message?.forward_from_message_id != null ||
+            message?.forward_date != null
+    );
+    if (!looksLikeForward) return false;
+
+    const target = extractChannelReplyTarget(message);
     if (!target) {
         await ctx.reply(
             `${e('warning')} پست را مستقیم از <b>کانال</b> فوروارد کن (نه از چت خصوصی).`,
@@ -514,5 +530,6 @@ module.exports = {
     handleChannelPostText,
     handleChannelPostPublish,
     handleChannelPostCancel,
-    publishChannelButtonOnly
+    publishChannelButtonOnly,
+    clearSession: clearSession
 };
