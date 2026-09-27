@@ -181,11 +181,12 @@ function resolveChannelId(payload) {
  * @param {string} [rawQuery]
  */
 async function startBindFromPayload(ctx, payload, rawQuery = '') {
+    const hadChannelOrigin = Boolean(String(payload?.channelId ?? '').trim());
     const channelId = resolveChannelId(payload);
     if (!channelId) {
         await ctx.reply(
-            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن ` +
-                `یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
+            `${e('warning')} کانال مقصد مشخص نیست.\n` +
+                `پست را از کانال فوروارد کن، یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
             htmlOpts()
         );
         return false;
@@ -212,7 +213,8 @@ async function startBindFromPayload(ctx, payload, rawQuery = '') {
         captionText: payload.captionText,
         captionEntities: payload.captionEntities,
         channelId,
-        channelMessageId: payload.channelMessageId,
+        // Only keep message id when the payload came from a real channel post.
+        channelMessageId: hadChannelOrigin ? payload.channelMessageId : null,
         query,
         expiresAt: Date.now() + BIND_TTL_MS
     };
@@ -264,7 +266,8 @@ async function startBindFromPayload(ctx, payload, rawQuery = '') {
 }
 
 /**
- * Auto menu when admin forwards a channel post into the bot DM.
+ * Auto menu when admin sends (or forwards) a photo+caption into the bot DM.
+ * Channel forward is optional — a fresh DM photo works for first-time template bind.
  * @param {import('telegraf').Context} ctx
  * @returns {Promise<boolean>}
  */
@@ -273,15 +276,15 @@ async function offerAdminForwardActions(ctx) {
     if (ctx.chat?.type !== 'private') return false;
 
     const message = ctx.message;
-    if (!isChannelForwardMessage(message)) return false;
-
     const payload = extractChannelPostPayload(message);
     if (!payload) return false;
 
+    const fromChannel = isChannelForwardMessage(message);
     const channelId = resolveChannelId(payload);
     if (!channelId) {
         await ctx.reply(
-            `${e('warning')} کانال مبدأ مشخص نیست. پست را مستقیم از کانال فوروارد کن.`,
+            `${e('warning')} کانال مقصد مشخص نیست.\n` +
+                `پست را از کانال فوروارد کن، یا <code>PUBLIC_POSTS_CHANNEL_ID</code> را در env بات ست کن.`,
             htmlOpts()
         );
         return true;
@@ -294,7 +297,7 @@ async function offerAdminForwardActions(ctx) {
         captionText: payload.captionText,
         captionEntities: payload.captionEntities,
         channelId,
-        channelMessageId: payload.channelMessageId,
+        channelMessageId: fromChannel ? payload.channelMessageId : null,
         expiresAt: Date.now() + BIND_TTL_MS,
         awaitQuery: false
     });
@@ -304,49 +307,65 @@ async function offerAdminForwardActions(ctx) {
         payload.captionEntities
     );
 
+    const headline = fromChannel
+        ? `${e('clipboard')} <b>پست کانال دریافت شد</b>`
+        : `${e('clipboard')} <b>عکس و کپشن دریافت شد</b>\n` +
+          `می‌توانی همین را به‌عنوان قالب کانال به انیمه وصل کنی (بدون فوروارد از کانال).`;
+
+    /** @type {import('telegraf/types').InlineKeyboardButton[][]} */
+    const rows = [
+        [
+            {
+                text: '🔗 وصل قالب به انیمه',
+                callback_data: `af:bind:${sessionId}`
+            }
+        ],
+        [
+            {
+                text: '🔎 جستجو با نام…',
+                callback_data: `af:search:${sessionId}`
+            }
+        ]
+    ];
+
+    if (fromChannel) {
+        rows.push([
+            {
+                text: '🧹 خالی کردن صف پیش‌نویس',
+                callback_data: 'af:clearq'
+            },
+            {
+                text: '⚡ ارسال فوری صف',
+                callback_data: 'af:flushq'
+            }
+        ]);
+        rows.push([
+            {
+                text: '🆔 شناسه کانال',
+                callback_data: `af:cid:${sessionId}`
+            },
+            {
+                text: '❌ بستن',
+                callback_data: `af:close:${sessionId}`
+            }
+        ]);
+    } else {
+        rows.push([
+            {
+                text: '❌ بستن',
+                callback_data: `af:close:${sessionId}`
+            }
+        ]);
+    }
+
     await ctx.reply(
-        `${e('clipboard')} <b>پست کانال دریافت شد</b>\n` +
-            (hint
-                ? `عنوان پیشنهادی: <code>${escapeHtml(hint)}</code>\n`
-                : '') +
+        `${headline}\n` +
+            (hint ? `عنوان پیشنهادی: <code>${escapeHtml(hint)}</code>\n` : '') +
             `یکی از گزینه‌ها را انتخاب کن:`,
         {
             ...htmlOpts(),
             reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: '🔗 وصل قالب به انیمه',
-                            callback_data: `af:bind:${sessionId}`
-                        }
-                    ],
-                    [
-                        {
-                            text: '🔎 جستجو با نام…',
-                            callback_data: `af:search:${sessionId}`
-                        }
-                    ],
-                    [
-                        {
-                            text: '🧹 خالی کردن صف پیش‌نویس',
-                            callback_data: 'af:clearq'
-                        },
-                        {
-                            text: '⚡ ارسال فوری صف',
-                            callback_data: 'af:flushq'
-                        }
-                    ],
-                    [
-                        {
-                            text: '🆔 شناسه کانال',
-                            callback_data: `af:cid:${sessionId}`
-                        },
-                        {
-                            text: '❌ بستن',
-                            callback_data: `af:close:${sessionId}`
-                        }
-                    ]
-                ]
+                inline_keyboard: rows
             }
         }
     );
@@ -556,7 +575,7 @@ async function sendSearchResults(ctx, session, bindId) {
 }
 
 /**
- * /bind_channel_post [query] — reply to a forwarded channel post.
+ * /bind_channel_post [query] — reply to a photo+caption (channel forward or fresh DM).
  * Without query: extract title from caption and show search picker.
  * With query that looks like an exact slug/id: still search; if single exact
  * slug match is preferred via picker (or direct bind when query equals slug uniquely).
@@ -578,12 +597,13 @@ async function handleBindChannelPost(ctx) {
     const payload = extractChannelPostPayload(source);
     if (!payload) {
         await ctx.reply(
-            `${e('clipboard')} <b>راهنما</b>\n` +
-                `پست کانال را به اینجا فوروارد کن — منوی دکمه‌ای می‌آید.\n` +
-                `یا روی پیام فوروارد ریپلای بزن:\n` +
+            `${e('clipboard')} <b>راهنما — وصل قالب کانال</b>\n` +
+                `عکس + کپشن را به بات بفرست (یا از کانال فوروارد کن) تا منوی وصل بیاید.\n` +
+                `یا روی همان پیام ریپلای بزن:\n` +
                 `<code>/bind_channel_post</code>\n` +
-                `یا با کوئری:\n` +
-                `<code>/bind_channel_post dandadan</code>`,
+                `یا با نام/اسلاگ:\n` +
+                `<code>/bind_channel_post dandadan</code>\n\n` +
+                `بعد از وصل، از پنل → تب فایل‌ها → «پیش‌نویس کانال» را بزن.`,
             htmlOpts()
         );
         return;

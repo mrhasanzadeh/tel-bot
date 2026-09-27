@@ -755,7 +755,7 @@ function setupHandlers(bot) {
         await handlePackCancelRequest(ctx, String(ctx.from.id));
     });
 
-    // Admin: channel post forward → action menu; else schedule cover photo
+    // Admin: photo+caption (DM or channel forward) → bind menu; else schedule cover
     bot.on(['photo', 'document'], async (ctx) => {
         try {
             if (isMonitoredChannelChat(ctx)) return;
