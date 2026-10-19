@@ -4,6 +4,7 @@ const {
     getChannelFilePost
 } = require('../utils/channelIds');
 const archiveMirrorService = require('./archiveMirrorService');
+const { routeSubtitleChannel } = require('./subtitleIntakeService');
 
 /**
  * Route file posts from archive or private channels.
@@ -16,6 +17,11 @@ const archiveMirrorService = require('./archiveMirrorService');
  * @returns {Promise<boolean>}
  */
 async function route(ctx, fileHandlerService) {
+    // Translator subtitle channel (ASS/ZIP) — before archive/private gates
+    if (await routeSubtitleChannel(ctx)) {
+        return true;
+    }
+
     const intake = getChannelFilePost(ctx);
     if (!intake) return false;
 

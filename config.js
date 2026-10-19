@@ -31,6 +31,11 @@ module.exports = {
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,
     LINKS_CHANNEL_ID: process.env.LINKS_CHANNEL_ID,
     ARCHIVE_CHANNEL_ID: process.env.ARCHIVE_CHANNEL_ID || process.env.LINKS_CHANNEL_ID,
+    /**
+     * Translator subtitle channel (ASS/ZIP). When set, channel_post documents
+     * matching Shiori subtitle naming are forwarded to automation intake API.
+     */
+    SUBTITLE_CHANNEL_ID: process.env.SUBTITLE_CHANNEL_ID || '',
     /** Default archive → private copy on boot (overridable via /mirroring + bot_settings) */
     ARCHIVE_MIRROR_ENABLED: parseEnvBool(process.env.ARCHIVE_MIRROR_ENABLED, true),
     PUBLIC_CHANNEL_ID: process.env.PUBLIC_CHANNEL_ID,

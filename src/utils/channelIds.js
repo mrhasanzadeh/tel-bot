@@ -17,6 +17,10 @@ function getArchiveChannelId() {
     return normalizeChatId(config.ARCHIVE_CHANNEL_ID || config.LINKS_CHANNEL_ID);
 }
 
+function getSubtitleChannelId() {
+    return normalizeChatId(config.SUBTITLE_CHANNEL_ID);
+}
+
 function getPublicPostsChannelId() {
     return normalizeChatId(
         config.PUBLIC_POSTS_CHANNEL_ID ||
@@ -150,6 +154,7 @@ module.exports = {
     normalizeChatId,
     getPrivateChannelId,
     getArchiveChannelId,
+    getSubtitleChannelId,
     getPublicPostsChannelId,
     getPublishChannelChoices,
     getSchedulePublishChannelId,
