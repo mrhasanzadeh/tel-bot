@@ -19,6 +19,11 @@ async function routeSubtitleChannel(ctx) {
     const chatId = normalizeChatId(ctx.chat?.id);
     if (!post || chatId !== subtitleId) return false;
 
+    console.log(
+        `📥 Subtitle channel hit chat=${chatId} msg=${post.message_id} ` +
+            `hasDocument=${Boolean(post.document)}`
+    );
+
     const doc = post.document;
     if (!doc) {
         console.log(`⏭️ Subtitle channel non-document ignored msg=${post.message_id}`);

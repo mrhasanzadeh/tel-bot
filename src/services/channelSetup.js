@@ -3,6 +3,7 @@ const {
     getPrivateChannelId,
     getSchedulePublishChannelId,
     getPublicPostsChannelId,
+    getSubtitleChannelId,
     isScheduleTestMode
 } = require('../utils/channelIds');
 const archiveMirrorService = require('./archiveMirrorService');
@@ -13,6 +14,7 @@ const archiveMirrorService = require('./archiveMirrorService');
 async function logChannelSetup(bot) {
     const archiveId = getArchiveChannelId();
     const privateId = getPrivateChannelId();
+    const subtitleId = getSubtitleChannelId();
 
     const scheduleId = getSchedulePublishChannelId();
     const productionScheduleId = getPublicPostsChannelId();
@@ -20,11 +22,17 @@ async function logChannelSetup(bot) {
     console.log('📡 Channel routing:');
     console.log(`   ARCHIVE (upload)  LINKS_CHANNEL_ID = ${archiveId || '(not set)'}`);
     console.log(`   PRIVATE (links)   PRIVATE_CHANNEL_ID = ${privateId || '(not set)'}`);
+    console.log(`   SUBTITLE (intake) SUBTITLE_CHANNEL_ID = ${subtitleId || '(not set)'}`);
     if (isScheduleTestMode()) {
         console.log(`   SCHEDULE (TEST)   SCHEDULE_TEST_CHANNEL_ID = ${scheduleId}`);
         console.log(`   SCHEDULE (prod)   PUBLIC_POSTS_CHANNEL_ID = ${productionScheduleId} (skipped)`);
     } else {
         console.log(`   SCHEDULE (posts)  PUBLIC_POSTS_CHANNEL_ID = ${scheduleId || '(not set)'}`);
+    }
+    if (!subtitleId) {
+        console.warn(
+            '⚠️ SUBTITLE_CHANNEL_ID is not set — translator channel uploads will be ignored'
+        );
     }
 
     if (!archiveId) {
@@ -45,7 +53,8 @@ async function logChannelSetup(bot) {
     for (const [label, chatId] of [
         ['ARCHIVE', archiveId],
         ['PRIVATE', privateId],
-        ['SCHEDULE', scheduleId]
+        ['SCHEDULE', scheduleId],
+        ['SUBTITLE', subtitleId]
     ]) {
         if (!chatId) continue;
         try {
@@ -54,6 +63,11 @@ async function logChannelSetup(bot) {
             console.log(
                 `✅ ${label}: "${chat.title}" type=${chat.type} bot=${member.status}`
             );
+            if (label === 'SUBTITLE' && !['administrator', 'creator'].includes(member.status)) {
+                console.error(
+                    '   → بات باید ادمین کانال مترجم باشد؛ وگرنه channel_post به بات نمی‌رسد و لاگ خالی می‌ماند.'
+                );
+            }
         } catch (error) {
             console.error(`❌ ${label} (${chatId}): ${error.message}`);
             if (label === 'ARCHIVE') {
@@ -64,6 +78,11 @@ async function logChannelSetup(bot) {
             if (label === 'SCHEDULE') {
                 console.error(
                     '   → بات در کانال انتشار schedule ادمین نیست — پست‌های TheShioriSub/تست منتشر نمی‌شوند.'
+                );
+            }
+            if (label === 'SUBTITLE') {
+                console.error(
+                    '   → SUBTITLE_CHANNEL_ID اشتباه است یا بات ادمین کانال مترجم نیست. تا رفع نشود هیچ لاگی از ساب دیده نمی‌شود.'
                 );
             }
         }

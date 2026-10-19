@@ -9,6 +9,7 @@ const {
     isMonitoredChannelChat,
     getArchiveChannelId,
     getPrivateChannelId,
+    getSubtitleChannelId,
     getAdminUserId,
     isAdminUserId,
     normalizeChatId
@@ -196,15 +197,17 @@ function setupHandlers(bot) {
                 const chatId = normalizeChatId(chat.id);
                 const archiveId = getArchiveChannelId();
                 const privateId = getPrivateChannelId();
+                const subtitleId = getSubtitleChannelId();
+                const post = ctx.channelPost || ctx.message;
                 const hasFile = Boolean(
-                    (ctx.channelPost || ctx.message)?.document ||
-                    (ctx.channelPost || ctx.message)?.video ||
-                    (ctx.channelPost || ctx.message)?.audio
+                    post?.document || post?.video || post?.audio
                 );
                 console.log(
                     `👀 Channel update chat=${chatId} title="${chat.title || ''}" ` +
                         `type=${chatType} file=${hasFile} ` +
-                        `matchArchive=${archiveId === chatId} matchPrivate=${privateId === chatId}`
+                        `doc=${Boolean(post?.document)} ` +
+                        `matchArchive=${archiveId === chatId} matchPrivate=${privateId === chatId} ` +
+                        `matchSubtitle=${Boolean(subtitleId) && subtitleId === chatId}`
                 );
             }
         }
