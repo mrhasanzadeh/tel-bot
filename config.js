@@ -27,6 +27,9 @@ module.exports = {
     /** File-delivery / upload bot username (no @). */
     TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME || 'ShioriUploadBot',
     SHIORI_API_URL: process.env.SHIORI_API_URL,
+    /** Dashboard base for automation job deep links in admin DMs */
+    SHIORI_DASH_URL:
+        process.env.SHIORI_DASH_URL || 'https://dash.shiori.cloud',
     BOT_API_TOKEN: process.env.BOT_API_TOKEN,
     PRIVATE_CHANNEL_ID: process.env.PRIVATE_CHANNEL_ID,
     LINKS_CHANNEL_ID: process.env.LINKS_CHANNEL_ID,
