@@ -1144,6 +1144,8 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
         try {
             await deliverPendingChannelDraftPreviews(bot);
             await deliverPendingDashPublishes(bot);
+            const { deliverPendingAutomationStatus } = require('./automationStatusService');
+            await deliverPendingAutomationStatus(bot);
         } finally {
             running = false;
         }

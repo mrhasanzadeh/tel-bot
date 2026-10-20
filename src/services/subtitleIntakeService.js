@@ -3,42 +3,9 @@ const { parseAnimeFilename } = require('../utils/animeFilenameParser');
 const { getSubtitleChannelId, normalizeChatId } = require('../utils/channelIds');
 const shioriApi = require('./shioriApiClient');
 const { getAdminUserIds } = require('../utils/channelIds');
-const config = require('../../config');
+const { syncJobLiveStatusFromDto } = require('./automationStatusService');
 
 const SUB_EXT = /\.(zip|ass)$/i;
-
-/** Persian labels aligned with dash AdminAutomation JOB_STATE_FA */
-const JOB_STATE_FA = {
-    SUBTITLE_RECEIVED: 'ساب دریافت شد',
-    MATCHED: 'مچ شد',
-    ELIGIBLE: 'آماده اجرا',
-    SEARCHING: 'جستجوی ریلیز',
-    AWAITING_SELECTION: 'انتخاب ریلیز',
-    DOWNLOAD_QUEUED: 'صف دانلود',
-    DOWNLOADING: 'در حال دانلود',
-    DOWNLOADED: 'دانلود شد',
-    WAITING_FOR_SUBTITLE: 'منتظر ساب',
-    ENCODING: 'انکود',
-    MUXING: 'مکس ساب',
-    VALIDATING: 'اعتبارسنجی',
-    READY_FOR_ARCHIVE: 'آماده آرشیو',
-    AWAITING_MANUAL_ARCHIVE: 'آرشیو دستی',
-    ARCHIVING: 'آپلود آرشیو',
-    LINKED: 'لینک شد',
-    DRAFT_QUEUED: 'صف پیش‌نویس',
-    AWAITING_APPROVAL: 'منتظر تأیید',
-    PUBLISHED: 'منتشر شد',
-    NEEDS_REVIEW: 'نیاز به بررسی',
-    FAILED: 'ناموفق',
-    CANCELLED: 'لغو شده',
-};
-
-const STAGE_HINT = {
-    ELIGIBLE: 'ورکر به‌زودی جستجوی Nyaa را شروع می‌کند',
-    NEEDS_REVIEW: 'نیاز به اقدام ادمین در داشبورد',
-    WAITING_FOR_SUBTITLE: 'ساب به جاب قبلی وصل شد — مکس از سر گرفته می‌شود',
-    AWAITING_SELECTION: 'ریلیز مبهم است — مگنت را در داشبورد انتخاب کن',
-};
 
 /**
  * Handle translator subtitle uploads on SUBTITLE_CHANNEL_ID.
@@ -107,14 +74,13 @@ async function routeSubtitleChannel(ctx) {
         }
 
         if (result?.job) {
-            await notifyAdmins(ctx, formatJobStatusCard(result.job, fileName, result));
+            // One live card (created/updated by API); send or edit in place
+            await syncJobLiveStatusFromDto(ctx.telegram, result.job);
         } else if (result?.needs_review || result?.ineligible || result?.awaits_admin) {
             await notifyAdmins(
                 ctx,
                 `اتوماسیون ساب: <b>${escapeHtml(fileName)}</b>\n` +
-                    `نتیجه: <code>${escapeHtml(
-                        result.reason || 'needs_attention'
-                    )}</code>`
+                    `نتیجه: ${escapeHtml(persianIntakeReason(result.reason))}`
             );
         }
     } catch (err) {
@@ -130,51 +96,13 @@ async function routeSubtitleChannel(ctx) {
     return true;
 }
 
-/**
- * Dashboard-like status card for automation jobs (HTML).
- * @param {Record<string, unknown>} job
- * @param {string} [fileName]
- * @param {Record<string, unknown>} [result]
- */
-function formatJobStatusCard(job, fileName, result = {}) {
-    const state = String(job.state || '');
-    const stateFa = JOB_STATE_FA[state] || state;
-    const title =
-        job.anime_title ||
-        job.anime_slug ||
-        result?.submission?.filename_title ||
-        '—';
-    const ep = job.episode_number != null ? String(job.episode_number) : '—';
-    const trigger = job.trigger_source || 'subtitle';
-    const hint =
-        STAGE_HINT[state] ||
-        (result?.awaits_admin
-            ? 'حالت manual — تا تأیید ادمین شروع نمی‌شود'
-            : result?.reattached
-              ? 'ساب به جاب در حال اجرا وصل شد'
-              : '');
-    const dashBase = String(
-        config.SHIORI_DASH_URL || process.env.SHIORI_DASH_URL || 'https://dash.shiori.cloud'
-    ).replace(/\/$/, '');
-    const dashUrl = `${dashBase}/admin/automation/jobs/${job.id}`;
-
-    const lines = [
-        `🎬 <b>اتوماسیون سافت‌ساب</b>`,
-        `<b>${escapeHtml(title)}</b> — قسمت <code>${escapeHtml(ep)}</code>`,
-        `وضعیت: <b>${escapeHtml(stateFa)}</b> <code>${escapeHtml(state)}</code>`,
-        `منبع: <code>${escapeHtml(trigger)}</code>`,
-    ];
-    if (fileName) {
-        lines.push(`فایل: <code>${escapeHtml(fileName)}</code>`);
-    }
-    if (job.error_message) {
-        lines.push(`خطا: <code>${escapeHtml(job.error_message)}</code>`);
-    }
-    if (hint) {
-        lines.push(escapeHtml(hint));
-    }
-    lines.push(`<a href="${escapeHtml(dashUrl)}">باز کردن در داشبورد</a>`);
-    return lines.join('\n');
+function persianIntakeReason(reason) {
+    const r = String(reason || '');
+    if (r === 'anime_or_episode_unresolved') return 'عنوان یا قسمت تشخیص داده نشد';
+    if (r === 'automation_disabled') return 'اتوماسیون این انیمه خاموش است';
+    if (r === 'automation_paused') return 'اتوماسیون موقتاً متوقف است';
+    if (r.includes('ambiguous')) return 'چند انیمه هم‌نام — از داشبورد مشخص کن';
+    return r || 'نیاز به بررسی';
 }
 
 async function notifyAdmins(ctx, html) {
@@ -200,5 +128,4 @@ function escapeHtml(s) {
 
 module.exports = {
     routeSubtitleChannel,
-    formatJobStatusCard,
 };
