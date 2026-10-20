@@ -69,13 +69,13 @@ async function routeSubtitleChannel(ctx) {
                 `state=${result?.job?.state || result?.reason || result?.status || 'ok'}`
         );
 
-        if (result?.duplicate) {
-            return true;
-        }
-
         if (result?.job) {
-            // One live card (created/updated by API); send or edit in place
+            // New, restarted, or duplicate re-post — one live card (send or edit)
             await syncJobLiveStatusFromDto(ctx.telegram, result.job);
+        } else if (result?.duplicate && !result?.job) {
+            console.log(
+                `📝 Subtitle duplicate without job: ${fileName} — ${result?.reason || 'no job'}`
+            );
         } else if (result?.needs_review || result?.ineligible || result?.awaits_admin) {
             await notifyAdmins(
                 ctx,
