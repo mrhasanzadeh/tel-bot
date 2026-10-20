@@ -5,6 +5,7 @@
  * cannot both send a fresh message for the same revision.
  */
 
+const config = require('../../config');
 const shioriApi = require('./shioriApiClient');
 const { getAdminUserIds } = require('../utils/channelIds');
 
@@ -40,7 +41,7 @@ function buildLiveStatusKeyboard(item) {
         }
     }
 
-    const dashBase = String(process.env.SHIORI_DASH_URL || 'https://dash.shiori.cloud').replace(
+    const dashBase = String(config.SHIORI_DASH_URL || 'https://dash.shiori.cloud').replace(
         /\/$/,
         ''
     );
