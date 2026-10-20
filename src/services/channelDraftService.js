@@ -1226,6 +1226,7 @@ module.exports = {
     deliverPendingChannelDraftPreviews,
     deliverPendingDashPublishes,
     publishDraftViaBot,
+    buildDraftPreviewKeyboard,
     startChannelDraftPreviewPoller,
     extractChannelPostPayload,
     extractSearchQueryFromCaption,

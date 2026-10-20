@@ -13,6 +13,50 @@ function uniqueAdminIds() {
 }
 
 /**
+ * Inline keyboard under the live status card.
+ * When AWAITING_APPROVAL + draft_id: same publish/reject buttons as the draft preview.
+ * @param {{
+ *   state?: string,
+ *   draft_id?: string | null,
+ *   anime_id?: string | null,
+ *   job_id?: string,
+ * }} item
+ */
+function buildLiveStatusKeyboard(item) {
+    const state = String(item?.state ?? '');
+    const draftId = String(item?.draft_id ?? '').trim();
+    const animeId = String(item?.anime_id ?? '').trim();
+    const jobId = String(item?.job_id ?? '').trim();
+
+    /** @type {Array<Array<{ text: string, callback_data?: string, url?: string }>>} */
+    const rows = [];
+
+    if (state === 'AWAITING_APPROVAL' && draftId) {
+        // Lazy require avoids circular load with channelDraftService poller.
+        const { buildDraftPreviewKeyboard } = require('./channelDraftService');
+        const draftKb = buildDraftPreviewKeyboard(draftId, animeId);
+        for (const row of draftKb.inline_keyboard || []) {
+            rows.push(row);
+        }
+    }
+
+    const dashBase = String(process.env.SHIORI_DASH_URL || 'https://dash.shiori.cloud').replace(
+        /\/$/,
+        ''
+    );
+    if (jobId) {
+        rows.push([
+            {
+                text: 'مشاهده در داشبورد',
+                url: `${dashBase}/admin/automation/jobs/${encodeURIComponent(jobId)}`,
+            },
+        ]);
+    }
+
+    return rows.length ? { inline_keyboard: rows } : undefined;
+}
+
+/**
  * @param {import('telegraf').Telegram} telegram
  * @param {{
  *   job_id: string,
@@ -20,6 +64,9 @@ function uniqueAdminIds() {
  *   html: string,
  *   messages?: Record<string, number>,
  *   restore_delivered_rev?: number,
+ *   state?: string,
+ *   draft_id?: string | null,
+ *   anime_id?: string | null,
  * }} item
  */
 async function deliverOneLiveStatus(telegram, item) {
@@ -35,6 +82,13 @@ async function deliverOneLiveStatus(telegram, item) {
         return;
     }
 
+    const replyMarkup = buildLiveStatusKeyboard(item);
+    const sendOpts = {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup,
+    };
+
     /** @type {Record<string, number>} */
     const messages = { ...(item.messages || {}) };
     let deliveredOk = false;
@@ -46,20 +100,27 @@ async function deliverOneLiveStatus(telegram, item) {
             try {
                 if (existing > 0) {
                     try {
-                        await telegram.editMessageText(adminId, existing, undefined, html, {
-                            parse_mode: 'HTML',
-                            disable_web_page_preview: true,
-                        });
+                        await telegram.editMessageText(adminId, existing, undefined, html, sendOpts);
                         deliveredOk = true;
                     } catch (editErr) {
                         const desc = String(editErr?.description || editErr?.message || editErr);
                         if (/message is not modified/i.test(desc)) {
+                            // Text same — still refresh keyboard (approve buttons).
+                            if (replyMarkup) {
+                                try {
+                                    await telegram.editMessageReplyMarkup(
+                                        adminId,
+                                        existing,
+                                        undefined,
+                                        replyMarkup
+                                    );
+                                } catch {
+                                    /* ignore */
+                                }
+                            }
                             deliveredOk = true;
                         } else {
-                            const sent = await telegram.sendMessage(adminId, html, {
-                                parse_mode: 'HTML',
-                                disable_web_page_preview: true,
-                            });
+                            const sent = await telegram.sendMessage(adminId, html, sendOpts);
                             if (sent?.message_id) {
                                 messages[key] = sent.message_id;
                                 deliveredOk = true;
@@ -67,10 +128,7 @@ async function deliverOneLiveStatus(telegram, item) {
                         }
                     }
                 } else {
-                    const sent = await telegram.sendMessage(adminId, html, {
-                        parse_mode: 'HTML',
-                        disable_web_page_preview: true,
-                    });
+                    const sent = await telegram.sendMessage(adminId, html, sendOpts);
                     if (sent?.message_id) {
                         messages[key] = sent.message_id;
                         deliveredOk = true;
