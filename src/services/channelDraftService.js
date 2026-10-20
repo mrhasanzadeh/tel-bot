@@ -773,6 +773,72 @@ function buildDraftPreviewKeyboard(draftId, animeId) {
 }
 
 /**
+ * Publish a channel draft via Telegram (shared by callback + dash poller).
+ * @param {import('telegraf').Telegram} telegram
+ * @param {string} draftId
+ * @param {string} [channelIdOverride]
+ * @returns {Promise<{ already?: boolean, messageId: number|string|null, channelId: string, label: string }>}
+ */
+async function publishDraftViaBot(telegram, draftId, channelIdOverride) {
+    const channels = getPublishChannelChoices();
+    let channelId = String(channelIdOverride ?? '').trim();
+    if (!channelId && channels.length >= 1) {
+        channelId = channels[0].id;
+    }
+
+    const prepared = await shioriApi.post(
+        `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`,
+        channelId ? { channel_id: channelId } : {}
+    );
+
+    if (prepared?.already_published) {
+        return {
+            already: true,
+            messageId: null,
+            channelId: channelId || '',
+            label: channelId || '—',
+        };
+    }
+
+    if (!prepared?.needs_bot_send) {
+        throw new Error('publish payload missing needs_bot_send');
+    }
+
+    const targetChannelId = String(prepared.channel_id || channelId || '').trim();
+    const cover = prepared.cover_file_id;
+    const caption = prepared.caption;
+    if (!targetChannelId || !cover || !caption) {
+        throw new Error('publish payload incomplete');
+    }
+
+    const sent = await telegram.sendPhoto(targetChannelId, cover, {
+        caption,
+        parse_mode: 'HTML',
+        reply_markup: prepared.reply_markup || undefined,
+    });
+
+    const messageId = sent?.message_id ?? null;
+    console.log(`📋 channel draft published draft=${draftId} msg=${messageId}`);
+
+    if (!messageId) {
+        throw new Error('sendPhoto returned no message_id');
+    }
+
+    await shioriApi.post(
+        `/bot/channel-drafts/${encodeURIComponent(draftId)}/mark-published`,
+        {
+            published_message_id: messageId,
+            channel_id: targetChannelId,
+        }
+    );
+
+    const label =
+        channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
+
+    return { already: false, messageId, channelId: targetChannelId, label };
+}
+
+/**
  * @param {import('telegraf').Context} ctx
  * @param {string} draftId
  * @param {'publish' | 'reject'} action
@@ -822,54 +888,15 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             }
         }
 
-        const prepared = await shioriApi.post(
-            `/bot/channel-drafts/${encodeURIComponent(draftId)}/publish`,
-            channelId ? { channel_id: channelId } : {}
-        );
-
-        if (prepared?.already_published) {
+        const result = await publishDraftViaBot(ctx.telegram, draftId, channelId);
+        if (result.already) {
             await ctx.reply(`${e('info')} قبلاً منتشر شده بود.`, htmlOpts());
             return;
         }
 
-        if (!prepared?.needs_bot_send) {
-            throw new Error('publish payload missing needs_bot_send');
-        }
-
-        const targetChannelId = String(prepared.channel_id || channelId || '').trim();
-        const cover = prepared.cover_file_id;
-        const caption = prepared.caption;
-        if (!targetChannelId || !cover || !caption) {
-            throw new Error('publish payload incomplete');
-        }
-
-        const sent = await ctx.telegram.sendPhoto(targetChannelId, cover, {
-            caption,
-            parse_mode: 'HTML',
-            reply_markup: prepared.reply_markup || undefined
-        });
-
-        const messageId = sent?.message_id ?? null;
-        console.log(`📋 channel draft published draft=${draftId} msg=${messageId}`);
-
-        if (!messageId) {
-            throw new Error('sendPhoto returned no message_id');
-        }
-
-        await shioriApi.post(
-            `/bot/channel-drafts/${encodeURIComponent(draftId)}/mark-published`,
-            {
-                published_message_id: messageId,
-                channel_id: targetChannelId
-            }
-        );
-
-        const label =
-            channels.find((c) => c.id === targetChannelId)?.label || targetChannelId;
-
         await ctx.reply(
-            `${e('success')} منتشر شد در <b>${escapeHtml(label)}</b>.\n` +
-                `message_id: <code>${escapeHtml(String(messageId))}</code>\n` +
+            `${e('success')} منتشر شد در <b>${escapeHtml(result.label)}</b>.\n` +
+                `message_id: <code>${escapeHtml(String(result.messageId))}</code>\n` +
                 `${e('info')} کپشن را در کانال ادیت کن و متن پیش‌نمایش را جایگزین کن تا اموجی پرمیوم حفظ شود.`,
             htmlOpts()
         );
@@ -879,6 +906,70 @@ async function handleChannelDraftCallback(ctx, draftId, action, channelIdOverrid
             `${e('error')} خطا: ${escapeHtml(error.message)}`,
             htmlOpts()
         );
+    }
+}
+
+/**
+ * Dash-requested publishes (POST /automation/jobs/:id/request-publish).
+ * @param {import('telegraf').Telegraf} bot
+ */
+async function deliverPendingDashPublishes(bot) {
+    let data;
+    try {
+        data = await shioriApi.get('/bot/automation/jobs/pending-publish?limit=5');
+    } catch (error) {
+        console.warn('📋 pending-publish poll failed:', error.message);
+        return;
+    }
+    if (data == null) return;
+
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (!items.length) return;
+
+    console.log(`📋 Dash publish poller: ${items.length} job(s)`);
+    for (const item of items) {
+        const draftId = String(item?.draft_id ?? '').trim();
+        const jobId = String(item?.job_id ?? '').trim();
+        if (!draftId) continue;
+        try {
+            const result = await publishDraftViaBot(bot.telegram, draftId);
+            const title = item.anime_title || jobId.slice(0, 8);
+            const ep = item.episode_number != null ? `E${item.episode_number}` : '';
+            for (const adminId of getAdminUserIds()) {
+                try {
+                    await bot.telegram.sendMessage(
+                        adminId,
+                        result.already
+                            ? `${e('info')} جاب <b>${escapeHtml(title)}</b> ${escapeHtml(ep)} قبلاً منتشر شده بود.`
+                            : `${e('success')} از داشبورد منتشر شد: <b>${escapeHtml(title)}</b> ${escapeHtml(ep)}\n` +
+                                  `کانال: <b>${escapeHtml(result.label)}</b>`,
+                        htmlOpts()
+                    );
+                } catch (dmErr) {
+                    console.warn(
+                        `📋 publish notify admin ${adminId}:`,
+                        dmErr.message || dmErr
+                    );
+                }
+            }
+        } catch (error) {
+            console.error(
+                `📋 dash publish failed draft=${draftId} job=${jobId}:`,
+                error.message || error
+            );
+            for (const adminId of getAdminUserIds()) {
+                try {
+                    await bot.telegram.sendMessage(
+                        adminId,
+                        `${e('error')} انتشار از داشبورد ناموفق (job <code>${escapeHtml(jobId)}</code>):\n` +
+                            escapeHtml(error.message || String(error)),
+                        htmlOpts()
+                    );
+                } catch {
+                    /* ignore */
+                }
+            }
+        }
     }
 }
 
@@ -1052,6 +1143,7 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
         running = true;
         try {
             await deliverPendingChannelDraftPreviews(bot);
+            await deliverPendingDashPublishes(bot);
         } finally {
             running = false;
         }
@@ -1061,7 +1153,7 @@ function startChannelDraftPreviewPoller(bot, intervalMs = 5_000) {
         void tick();
     }, intervalMs);
     console.log(
-        `📋 Channel draft preview poller started (${intervalMs}ms) admins=${getAdminUserIds().join(',') || 'MISSING'}`
+        `📋 Channel draft preview+publish poller started (${intervalMs}ms) admins=${getAdminUserIds().join(',') || 'MISSING'}`
     );
     return timer;
 }
@@ -1130,6 +1222,8 @@ module.exports = {
     handleAdminForwardAction,
     handleAdminPendingSearchQuery,
     deliverPendingChannelDraftPreviews,
+    deliverPendingDashPublishes,
+    publishDraftViaBot,
     startChannelDraftPreviewPoller,
     extractChannelPostPayload,
     extractSearchQueryFromCaption,
