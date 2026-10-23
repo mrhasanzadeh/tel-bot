@@ -145,10 +145,26 @@ class DatabaseService {
         }));
     }
 
-    async incrementFileDownloads(key) {
+    async incrementFileDownloads(key, telegramUser) {
         await this._ensureConnection();
 
-        const res = await api.post(`/bot/files/${encodeURIComponent(key)}/downloads`);
+        const userId = Number(telegramUser?.id);
+        const visitor =
+            Number.isFinite(userId) && userId > 0
+                ? {
+                      telegram_user_id: userId,
+                      first_name: telegramUser.first_name ?? undefined,
+                      last_name: telegramUser.last_name ?? undefined,
+                      username: telegramUser.username ?? undefined,
+                      language_code: telegramUser.language_code ?? undefined,
+                      is_premium: Boolean(telegramUser.is_premium)
+                  }
+                : undefined;
+
+        const res = await api.post(
+            `/bot/files/${encodeURIComponent(key)}/downloads`,
+            visitor
+        );
         if (!res?.data) {
             console.log(`⚠️ File not found for download increment: ${key}`);
             return null;

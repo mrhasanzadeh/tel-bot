@@ -479,7 +479,7 @@ class FileHandlerService {
             }
 
             try {
-                await databaseService.incrementFileDownloads(fileKey);
+                await databaseService.incrementFileDownloads(fileKey, ctx.from);
             } catch (err) {
                 console.error('⚠️ Failed to increment downloads:', err);
             }
@@ -620,7 +620,7 @@ class FileHandlerService {
                         filesToDelete.push(forwardedMessage.message_id);
 
                         try {
-                            await databaseService.incrementFileDownloads(fileKey);
+                            await databaseService.incrementFileDownloads(fileKey, ctx.from);
                         } catch (incrErr) {
                             console.error('⚠️ Failed to increment pack file downloads:', incrErr);
                         }
